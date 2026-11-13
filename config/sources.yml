@@ -1,0 +1,119 @@
+sources:
+
+  plateformes_evenements:
+
+    - nom: "OpenAgenda"
+      url: "https://openagenda.com/"
+      type: "evenement"
+
+    - nom: "Eventbrite"
+      url: "https://www.eventbrite.fr/"
+      type: "evenement"
+
+    - nom: "L'Etudiant"
+      url: "https://www.letudiant.fr/"
+      type: "enseignement_superieur"
+
+    - nom: "Studyrama"
+      url: "https://www.studyrama.com/"
+      type: "enseignement_superieur"
+
+    - nom: "France Travail"
+      url: "https://www.francetravail.fr/"
+      type: "emploi"
+
+  enseignement_superieur:
+
+    - nom: "Université de Poitiers"
+      url: "https://www.univ-poitiers.fr/"
+      departement: "86"
+
+    - nom: "ENSMA"
+      url: "https://www.ensma.fr/"
+      departement: "86"
+
+    - nom: "ENSIP"
+      url: "https://ensip.univ-poitiers.fr/"
+      departement: "86"
+
+    - nom: "CESI Poitiers"
+      url: "https://poitiers.cesi.fr/"
+      departement: "86"
+
+    - nom: "Université de Limoges"
+      url: "https://www.unilim.fr/"
+      departement: "87"
+
+    - nom: "ENSIL-ENSCI"
+      url: "https://ensil-ensci.unilim.fr/"
+      departement: "87"
+
+    - nom: "3iL Ingénieurs"
+      url: "https://www.3il-ingenieurs.fr/"
+      departement: "19"
+
+    - nom: "Université de La Rochelle"
+      url: "https://www.univ-larochelle.fr/"
+      departement: "17"
+
+    - nom: "EIGSI"
+      url: "https://www.eigsi.fr/"
+      departement: "17"
+
+    - nom: "Excelia"
+      url: "https://www.excelia-group.fr/"
+      departement: "17"
+
+    - nom: "Cnam-Enjmin"
+      url: "https://enjmin.cnam.fr/"
+      departement: "16"
+
+  evenementiel:
+
+    - nom: "Poitiers Événements"
+      url: "https://www.poitiers-evenements.fr/"
+      departement: "86"
+
+    - nom: "Grand Châtellerault"
+      url: "https://www.grand-chatellerault.fr/"
+      departement: "86"
+
+    - nom: "Niort Événements"
+      url: "https://www.niort-evenements.com/"
+      departement: "79"
+
+    - nom: "Bocapole"
+      url: "https://www.bocapole.fr/"
+      departement: "79"
+
+    - nom: "Limoges Événements"
+      url: "https://www.limoges-evenements.fr/"
+      departement: "87"
+
+    - nom: "La Rochelle Événements"
+      url: "https://www.larochelle-evenements.fr/"
+      departement: "17"
+
+    - nom: "Saintes"
+      url: "https://www.saintes.fr/"
+      departement: "17"
+
+    - nom: "Royan"
+      url: "https://www.royan.fr/"
+      departement: "17"
+
+    - nom: "Grand Cognac"
+      url: "https://www.grand-cognac.fr/"
+      departement: "16"
+
+    - nom: "Guéret"
+      url: "https://www.gueret.fr/"
+      departement: "23"
+
+    - nom: "Creuse"
+      url: "https://www.creuse.fr/"
+      departement: "23"
+
+    - nom: "Brive"
+      url: "https://www.brive.fr/"
+      departement: "19"
