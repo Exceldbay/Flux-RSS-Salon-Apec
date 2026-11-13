@@ -11,49 +11,28 @@ permissions:
 
 jobs:
   recherche:
-
     runs-on: ubuntu-latest
 
     steps:
-
-      # ==========================================
-      # RÉCUPÉRER LE DÉPÔT
-      # ==========================================
 
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ==========================================
-      # INSTALLER PYTHON
-      # ==========================================
-
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      # ==========================================
-      # INSTALLER LES DÉPENDANCES
-      # ==========================================
 
       - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ==========================================
-      # LANCER LA RECHERCHE
-      # ==========================================
-
       - name: Lancer le programme
         run: |
           python src/main.py
-
-      # ==========================================
-      # ENREGISTRER LES RÉSULTATS
-      # ==========================================
 
       - name: Enregistrer les résultats
         run: |
@@ -73,13 +52,8 @@ jobs:
 
           git push
 
-      # ==========================================
-      # FIN
-      # ==========================================
-
       - name: Fin du workflow
         run: |
           echo "========================================"
           echo "VEILLE APEC TERMINÉE"
           echo "========================================"
-```
