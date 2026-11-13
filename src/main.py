@@ -5,7 +5,6 @@ from datetime import datetime
 import threading
 import time
 import re
-import shutil
 
 import feedparser
 import pandas as pd
@@ -103,82 +102,161 @@ REQUETES_SUPERIEUR = [
 
 
 # ============================================================
-# TERMES POSITIFS
+# SCORING — VERSION APEC RENFORCÉE
 # ============================================================
 
-TERMES_FORTS = [
-    "salon emploi",
-    "forum emploi",
-    "job dating",
-    "forum recrutement",
-    "salon recrutement",
-    "salon formation",
-    "forum formation",
-    "emploi cadre",
-    "emploi cadres",
-    "salon étudiant",
-    "forum étudiant",
-    "enseignement supérieur",
-    "études supérieures",
-    "portes ouvertes",
-    "journée portes ouvertes",
-    "alumni",
-    "rencontre entreprises"
-]
+TERMES_EMPLOI_FORTS = {
+    "salon emploi": 6,
+    "forum emploi": 6,
+    "forum de l'emploi": 6,
+    "job dating": 6,
+    "forum recrutement": 6,
+    "salon recrutement": 6,
+    "recrutement": 4,
+    "emploi cadre": 8,
+    "emploi cadres": 8,
+    "recrutement cadre": 8,
+    "recrutement cadres": 8,
+    "jeunes diplômés": 5,
+    "jeune diplômé": 5,
+    "cadres": 5,
+}
 
-TERMES_POSITIFS = [
-    "emploi",
-    "recrutement",
-    "formation",
-    "carrière",
-    "cadre",
-    "cadres",
-    "étudiant",
-    "étudiants",
-    "supérieur",
-    "université",
-    "école",
-    "ingénieur",
-    "ingénieurs",
-    "alumni",
-    "entreprise",
-    "entreprises",
-    "recruteur",
-    "recruteurs",
-    "alternance",
-    "apprentissage",
-    "forum",
-    "salon"
-]
+TERMES_FORMATION_FORTS = {
+    "salon formation": 5,
+    "forum formation": 5,
+    "formation professionnelle": 5,
+    "forum de la formation": 5,
+    "formation continue": 4,
+    "reconversion professionnelle": 4,
+    "évolution professionnelle": 4,
+}
 
-TERMES_BRUIT = [
-    "concert",
-    "spectacle",
-    "théâtre",
-    "festival",
-    "football",
-    "rugby",
-    "basket",
-    "marché",
-    "vide-grenier",
-    "brocante",
-    "braderie",
-    "patrimoine",
-    "agriculture",
-    "météo",
-    "faits divers",
-    "incendie",
-    "accident",
-    "politique",
-    "exposition"
-]
+TERMES_SUPERIEUR_FORTS = {
+    "salon étudiant": 6,
+    "salon étudiants": 6,
+    "forum étudiant": 6,
+    "forum étudiants": 6,
+    "enseignement supérieur": 6,
+    "études supérieures": 6,
+    "école d'ingénieurs": 6,
+    "école ingénieurs": 6,
+    "école de commerce": 5,
+    "université": 4,
+    "faculté": 4,
+    "alumni": 4,
+    "rencontre alumni": 5,
+    "rencontre entreprises étudiants": 6,
+    "portes ouvertes supérieur": 6,
+    "journée portes ouvertes université": 6,
+    "portes ouvertes école": 5,
+    "journée portes ouvertes école": 5,
+}
 
-TERMES_EXCLUSION = [
-    "chambre de commerce et d'industrie",
-    "chambre de commerce",
+TERMES_APEC = {
+    "cadre": 3,
+    "cadres": 5,
+    "jeune diplômé": 4,
+    "jeunes diplômés": 5,
+    "bac+5": 4,
+    "bac +5": 4,
+    "ingénieur": 3,
+    "ingénieurs": 4,
+    "management": 2,
+    "ressources humaines": 2,
+    "rh": 1,
+    "carrière": 3,
+    "carrières": 3,
+}
+
+TERMES_COMPLEMENTAIRES = {
+    "emploi": 2,
+    "recrutement": 2,
+    "formation": 2,
+    "étudiant": 2,
+    "étudiants": 2,
+    "supérieur": 2,
+    "université": 2,
+    "école": 1,
+    "entreprise": 1,
+    "entreprises": 1,
+    "recruteur": 2,
+    "recruteurs": 2,
+    "alternance": 2,
+    "apprentissage": 1,
+    "forum": 1,
+    "salon": 1,
+    "rencontre": 1,
+    "orientation": 2,
+}
+
+TERMES_BRUIT = {
+    "concert": -6,
+    "spectacle": -6,
+    "théâtre": -6,
+    "football": -5,
+    "rugby": -5,
+    "basket": -5,
+    "marché": -5,
+    "vide-grenier": -6,
+    "brocante": -6,
+    "braderie": -5,
+    "patrimoine": -4,
+    "agriculture": -4,
+    "météo": -5,
+    "faits divers": -6,
+    "incendie": -6,
+    "accident": -5,
+    "politique": -4,
+    "mariage": -5,
+    "gastronomie": -4,
+    "tourisme": -4,
+}
+
+TERMES_EXCLUSION_FORTS = [
     "cabinet de recrutement privé",
-    "agence de recrutement"
+    "cabinet recrutement privé",
+    "agence de recrutement",
+    "cabinet de recrutement",
 ]
+
+TERMES_CCI = [
+    "chambre de commerce et d'industrie organise",
+    "chambre de commerce et d'industrie organise le",
+    "chambre de commerce organise",
+    "cci organise",
+    "cci organise le",
+    "organisé par la cci",
+    "organisee par la cci",
+    "organisé par la chambre de commerce",
+    "organisee par la chambre de commerce",
+]
+
+VILLES_DEPARTEMENTS = {
+    "86": [
+        "poitiers", "châtellerault", "chatellerault",
+        "buxerolles", "jaunay-marigny", "mignaloux-beauvoir"
+    ],
+    "79": [
+        "niort", "bressuire", "parthenay", "thouars"
+    ],
+    "87": [
+        "limoges", "panazol", "saint-junien", "bellac"
+    ],
+    "17": [
+        "la rochelle", "rochefort", "saintes", "royan",
+        "surgères", "surgere", "jonzac"
+    ],
+    "16": [
+        "angoulême", "angouleme", "cognac", "jarnac", "confolens"
+    ],
+    "23": [
+        "guéret", "gueret", "aubusson", "la souterraine"
+    ],
+    "19": [
+        "brive", "tulle", "ussel", "égletons", "egletons"
+    ],
+}
 
 
 # ============================================================
@@ -246,8 +324,6 @@ def construire_requetes(departements):
 def rechercher_google_news(requete):
 
     # Requête volontairement simple.
-    #
-    # IMPORTANT :
     # On évite les grosses expressions avec OR et parenthèses
     # qui provoquaient la collecte à zéro.
 
@@ -303,6 +379,23 @@ def rechercher_google_news(requete):
                     ""
                 ).strip()
 
+                # Description / résumé RSS.
+                # Elle permet d'améliorer fortement le scoring.
+                description = article.get(
+                    "summary",
+                    ""
+                )
+
+                description = re.sub(
+                    r"<[^>]+>",
+                    " ",
+                    description
+                )
+
+                description = normaliser(
+                    description
+                )
+
                 source = ""
 
                 if hasattr(article, "source"):
@@ -319,9 +412,8 @@ def rechercher_google_news(requete):
                     "titre": titre,
                     "url": lien,
                     "source": source,
-                    "date_publication": (
-                        date_publication
-                    ),
+                    "description": description,
+                    "date_publication": date_publication,
                     "departement": (
                         requete["departement"]
                     ),
@@ -506,37 +598,314 @@ def dedoublonner(resultats):
 # SCORE
 # ============================================================
 
-def calculer_score(resultat):
+def contient_terme(texte, terme):
+    """
+    Recherche après normalisation.
+    """
 
-    texte = normaliser(
-        resultat["titre"]
-        + " "
-        + resultat["source"]
-    )
+    texte = normaliser(texte)
+    terme = normaliser(terme)
+
+    return terme in texte
+
+
+def score_termes(texte, dictionnaire):
+    """
+    Additionne les points des termes détectés.
+    Un terme ne rapporte des points qu'une seule fois.
+    """
 
     score = 0
+    details = []
 
-    for terme in TERMES_FORTS:
+    for terme, points in dictionnaire.items():
 
-        if terme in texte:
-            score += 15
+        if contient_terme(
+            texte,
+            terme
+        ):
 
-    for terme in TERMES_POSITIFS:
+            score += points
 
-        if terme in texte:
-            score += 3
+            details.append(
+                f"{terme} ({points:+d})"
+            )
 
-    for terme in TERMES_BRUIT:
+    return score, details
 
-        if terme in texte:
-            score -= 7
 
-    for terme in TERMES_EXCLUSION:
+def calculer_score(resultat):
 
-        if terme in texte:
-            score -= 40
+    titre = normaliser(
+        resultat.get("titre", "")
+    )
 
-    return score
+    source = normaliser(
+        resultat.get("source", "")
+    )
+
+    description = normaliser(
+        resultat.get("description", "")
+    )
+
+    texte_global = " ".join([
+        titre,
+        source,
+        description
+    ])
+
+    score_emploi = 0
+    score_formation = 0
+    score_superieur = 0
+    score_apec = 0
+    score_geographie = 0
+    score_date = 0
+    score_bruit = 0
+
+    details = []
+
+    # --------------------------------------------------------
+    # 1. EMPLOI / RECRUTEMENT
+    # --------------------------------------------------------
+
+    score, elements = score_termes(
+        texte_global,
+        TERMES_EMPLOI_FORTS
+    )
+
+    score_emploi += score
+    details.extend(elements)
+
+    # --------------------------------------------------------
+    # 2. FORMATION
+    # --------------------------------------------------------
+
+    score, elements = score_termes(
+        texte_global,
+        TERMES_FORMATION_FORTS
+    )
+
+    score_formation += score
+    details.extend(elements)
+
+    # --------------------------------------------------------
+    # 3. ENSEIGNEMENT SUPÉRIEUR
+    # --------------------------------------------------------
+
+    score, elements = score_termes(
+        texte_global,
+        TERMES_SUPERIEUR_FORTS
+    )
+
+    score_superieur += score
+    details.extend(elements)
+
+    # --------------------------------------------------------
+    # 4. DIMENSION APEC / CADRES
+    # --------------------------------------------------------
+
+    score, elements = score_termes(
+        texte_global,
+        TERMES_APEC
+    )
+
+    score_apec += score
+    details.extend(elements)
+
+    # --------------------------------------------------------
+    # 5. TERMES COMPLÉMENTAIRES
+    # --------------------------------------------------------
+
+    score, elements = score_termes(
+        texte_global,
+        TERMES_COMPLEMENTAIRES
+    )
+
+    score_complementaire = score
+    details.extend(elements)
+
+    # --------------------------------------------------------
+    # 6. BONUS TITRE
+    # --------------------------------------------------------
+
+    bonus_titre = 0
+
+    expressions_titre = (
+        list(TERMES_EMPLOI_FORTS.keys())
+        + list(TERMES_FORMATION_FORTS.keys())
+        + list(TERMES_SUPERIEUR_FORTS.keys())
+        + list(TERMES_APEC.keys())
+    )
+
+    for terme in expressions_titre:
+
+        if contient_terme(
+            titre,
+            terme
+        ):
+
+            bonus_titre += 2
+
+    bonus_titre = min(
+        bonus_titre,
+        8
+    )
+
+    if bonus_titre:
+        details.append(
+            f"Bonus titre (+{bonus_titre})"
+        )
+
+    # --------------------------------------------------------
+    # 7. GÉOGRAPHIE
+    # --------------------------------------------------------
+
+    departement = str(
+        resultat.get("departement", "")
+    )
+
+    nom_departement = normaliser(
+        resultat.get("nom_departement", "")
+    )
+
+    if (
+        departement
+        and departement in VILLES_DEPARTEMENTS
+    ):
+
+        if (
+            departement in texte_global
+            or nom_departement in texte_global
+        ):
+
+            score_geographie += 3
+
+            details.append(
+                "Département ciblé (+3)"
+            )
+
+        for ville in VILLES_DEPARTEMENTS[
+            departement
+        ]:
+
+            if ville in texte_global:
+
+                score_geographie += 2
+
+                details.append(
+                    f"Ville ciblée : {ville} (+2)"
+                )
+
+                break
+
+    # --------------------------------------------------------
+    # 8. ANNÉE
+    # --------------------------------------------------------
+
+    annee = str(
+        resultat.get(
+            "annee_recherchee",
+            ""
+        )
+    )
+
+    if annee == "2027":
+
+        score_date += 3
+
+        details.append(
+            "Édition 2027 (+3)"
+        )
+
+    elif annee == "2026":
+
+        score_date += 2
+
+        details.append(
+            "Édition 2026 (+2)"
+        )
+
+    elif annee == "2025":
+
+        score_date += 1
+
+        details.append(
+            "Édition 2025 (+1)"
+        )
+
+    # --------------------------------------------------------
+    # 9. DATE D'ÉVÉNEMENT DÉTECTÉE
+    # --------------------------------------------------------
+
+    motif_date = (
+        r"\b\d{1,2}\s+"
+        r"(janvier|février|fevrier|mars|avril|mai|juin|"
+        r"juillet|août|aout|septembre|octobre|novembre|"
+        r"décembre|decembre)\b"
+    )
+
+    if re.search(
+        motif_date,
+        texte_global
+    ):
+
+        score_date += 2
+
+        details.append(
+            "Date d'événement détectée (+2)"
+        )
+
+    # --------------------------------------------------------
+    # 10. BRUIT
+    # --------------------------------------------------------
+
+    for terme, points in TERMES_BRUIT.items():
+
+        if contient_terme(
+            texte_global,
+            terme
+        ):
+
+            score_bruit += points
+
+            details.append(
+                f"{terme} ({points:+d})"
+            )
+
+    # --------------------------------------------------------
+    # 11. SCORE FINAL
+    # --------------------------------------------------------
+
+    score_brut = (
+        score_emploi
+        + score_formation
+        + score_superieur
+        + score_apec
+        + score_complementaire
+        + bonus_titre
+        + score_geographie
+        + score_date
+        + score_bruit
+    )
+
+    score = max(
+        -20,
+        min(score_brut, 40)
+    )
+
+    return {
+        "score": score,
+        "score_emploi": score_emploi,
+        "score_formation": score_formation,
+        "score_superieur": score_superieur,
+        "score_apec": score_apec,
+        "score_geographie": score_geographie,
+        "score_date": score_date,
+        "score_bruit": score_bruit,
+        "score_complementaire": score_complementaire,
+        "bonus_titre": bonus_titre,
+        "details_score": " | ".join(details),
+    }
 
 
 # ============================================================
@@ -555,30 +924,65 @@ def traiter(resultats):
 
     for resultat in resultats:
 
-        texte = normaliser(
-            resultat["titre"]
-            + " "
-            + resultat["source"]
+        titre = normaliser(
+            resultat.get("titre", "")
         )
 
-        exclusion = False
-        motif = ""
+        source = normaliser(
+            resultat.get("source", "")
+        )
 
-        for terme in TERMES_EXCLUSION:
+        description = normaliser(
+            resultat.get("description", "")
+        )
+
+        texte = " ".join([
+            titre,
+            source,
+            description
+        ])
+
+        # ----------------------------------------------------
+        # EXCLUSIONS FORTES
+        # ----------------------------------------------------
+
+        exclusion = False
+        motif_exclusion = ""
+
+        for terme in TERMES_EXCLUSION_FORTS:
 
             if terme in texte:
 
                 exclusion = True
-                motif = terme
+                motif_exclusion = terme
+                break
+
+        # ----------------------------------------------------
+        # CCI
+        # ----------------------------------------------------
+
+        exclusion_cci = False
+
+        for terme in TERMES_CCI:
+
+            if terme in texte:
+
+                exclusion_cci = True
+                motif_exclusion = terme
                 break
 
         if exclusion:
 
-            resultat["score"] = -40
+            resultat["score"] = -20
             resultat["statut"] = (
                 "Non pertinent"
             )
-            resultat["motif"] = motif
+            resultat["motif"] = (
+                motif_exclusion
+            )
+            resultat["raison"] = (
+                "Exclusion : recrutement privé"
+            )
 
             non_pertinents.append(
                 resultat
@@ -586,32 +990,95 @@ def traiter(resultats):
 
             continue
 
-        score = calculer_score(
+        if exclusion_cci:
+
+            resultat["score"] = -20
+            resultat["statut"] = (
+                "Non pertinent"
+            )
+            resultat["motif"] = (
+                motif_exclusion
+            )
+            resultat["raison"] = (
+                "Événement organisé par une CCI"
+            )
+
+            non_pertinents.append(
+                resultat
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # CALCUL DU SCORE
+        # ----------------------------------------------------
+
+        scoring = calculer_score(
             resultat
         )
 
-        resultat["score"] = score
-        resultat["motif"] = ""
+        for cle, valeur in scoring.items():
+            resultat[cle] = valeur
 
-        if score >= 25:
+        score = scoring["score"]
+
+        resultat["motif"] = scoring[
+            "details_score"
+        ]
+
+        # ----------------------------------------------------
+        # SCORE MÉTIER
+        # ----------------------------------------------------
+
+        score_metier = (
+            scoring["score_emploi"]
+            + scoring["score_formation"]
+            + scoring["score_superieur"]
+            + scoring["score_apec"]
+        )
+
+        # ----------------------------------------------------
+        # PERTINENT
+        # ----------------------------------------------------
+
+        if (
+            score >= 12
+            and score_metier >= 5
+        ):
 
             resultat["statut"] = (
                 "Pertinent"
+            )
+
+            resultat["raison"] = (
+                "Signal métier Apec suffisamment fort"
             )
 
             pertinents.append(
                 resultat
             )
 
-        elif score >= 8:
+        # ----------------------------------------------------
+        # À VÉRIFIER
+        # ----------------------------------------------------
+
+        elif score >= 6:
 
             resultat["statut"] = (
                 "À vérifier"
             )
 
+            resultat["raison"] = (
+                "Potentiel événement Apec à vérifier"
+            )
+
             a_verifier.append(
                 resultat
             )
+
+        # ----------------------------------------------------
+        # NON PERTINENT
+        # ----------------------------------------------------
 
         else:
 
@@ -619,17 +1086,39 @@ def traiter(resultats):
                 "Non pertinent"
             )
 
+            resultat["raison"] = (
+                "Score insuffisant"
+            )
+
             non_pertinents.append(
                 resultat
             )
 
+    # --------------------------------------------------------
+    # TRI
+    # --------------------------------------------------------
+
     pertinents.sort(
-        key=lambda x: x["score"],
+        key=lambda x: x.get(
+            "score",
+            0
+        ),
         reverse=True
     )
 
     a_verifier.sort(
-        key=lambda x: x["score"],
+        key=lambda x: x.get(
+            "score",
+            0
+        ),
+        reverse=True
+    )
+
+    non_pertinents.sort(
+        key=lambda x: x.get(
+            "score",
+            0
+        ),
         reverse=True
     )
 
@@ -669,6 +1158,7 @@ def sauvegarder(
         "titre",
         "url",
         "source",
+        "description",
         "date_publication",
         "departement",
         "nom_departement",
@@ -676,9 +1166,24 @@ def sauvegarder(
         "categorie_numero",
         "categorie",
         "mot_cle",
+
         "score",
+
+        "score_emploi",
+        "score_formation",
+        "score_superieur",
+        "score_apec",
+        "score_geographie",
+        "score_date",
+        "score_bruit",
+        "score_complementaire",
+        "bonus_titre",
+
         "statut",
+        "raison",
         "motif",
+        "details_score",
+
         "date_collecte"
     ]
 
@@ -773,7 +1278,7 @@ def main():
     print()
     print("========================================")
     print("VEILLE APEC")
-    print("COLLECTEUR RSS FIABILISÉ")
+    print("COLLECTEUR RSS + SCORING APEC RENFORCÉ")
     print("========================================")
 
     departements = load_yaml(
@@ -847,10 +1352,16 @@ def main():
         resultats_bruts
     )
 
+    total_apres_dedoublonnage = (
+        len(pertinents)
+        + len(a_verifier)
+        + len(non_pertinents)
+    )
+
     print()
     print(
         f"Après dédoublonnage : "
-        f"{len(pertinents) + len(a_verifier) + len(non_pertinents)}"
+        f"{total_apres_dedoublonnage}"
     )
 
     print(
@@ -887,7 +1398,8 @@ def main():
     print("========================================")
 
     print(
-        f"Erreurs : {erreurs}"
+        f"Erreurs : "
+        f"{erreurs}"
     )
 
     print(
@@ -905,11 +1417,15 @@ def main():
 
     if sauvegarde_ok:
 
-        print("VEILLE TERMINÉE AVEC SUCCÈS")
+        print(
+            "VEILLE TERMINÉE AVEC SUCCÈS"
+        )
 
     else:
 
-        print("VEILLE NON VALIDÉE")
+        print(
+            "VEILLE NON VALIDÉE"
+        )
 
     print("========================================")
 
