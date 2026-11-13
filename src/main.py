@@ -12,6 +12,8 @@ import yaml
 import requests
 from requests.adapters import HTTPAdapter
 
+from ia import analyser_resultat
+
 
 # ============================================================
 # CONFIGURATION
@@ -25,6 +27,7 @@ OUTPUT = ROOT / "output"
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
+MAX_IA_ANALYSES = 50
 
 thread_local = threading.local()
 
@@ -766,6 +769,83 @@ def traiter(resultats):
 
 
 # ============================================================
+# COUCHE IA GEMINI
+# ============================================================
+
+def appliquer_ia(pertinents, a_verifier):
+    """
+    Analyse les candidats avec Gemini sans jamais bloquer le flux RSS.
+
+    Pour conserver le fonctionnement gratuit, on limite le nombre
+    d'analyses IA par exécution. Les candidats sont classés par score
+    Python décroissant afin de donner la priorité aux meilleurs signaux.
+    """
+
+    candidats = pertinents + a_verifier
+    candidats.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    analyses = 0
+    ia_resultats = []
+    nouveaux_pertinents = []
+    nouveaux_a_verifier = []
+
+    print()
+    print("========================================")
+    print("COUCHE IA GEMINI")
+    print("========================================")
+    print(f"Candidats à analyser : {len(candidats)}")
+    print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
+
+    for resultat in candidats:
+        if analyses >= MAX_IA_ANALYSES:
+            resultat["decision_ia"] = "IA_NON_ANALYSE"
+            resultat["confiance_ia"] = 0
+            resultat["raison_ia"] = "Limite quotidienne/préventive d'analyses atteinte."
+            resultat["categorie_ia"] = ""
+            resultat["date_ia"] = ""
+            resultat["departement_ia"] = ""
+            resultat["ia_analyse"] = "NON"
+            nouveaux_a_verifier.append(resultat)
+            continue
+
+        analyse = analyser_resultat(resultat)
+        analyses += 1
+
+        resultat.update(analyse)
+        resultat["ia_analyse"] = "OUI"
+
+        decision = analyse.get("decision_ia", "IA_INDISPONIBLE")
+
+        if decision == "PERTINENT":
+            resultat["statut_final"] = "Pertinent"
+            nouveaux_pertinents.append(resultat)
+        elif decision == "NON_PERTINENT":
+            resultat["statut_final"] = "Non pertinent"
+            ia_resultats.append(resultat)
+        else:
+            resultat["statut_final"] = "À vérifier"
+            nouveaux_a_verifier.append(resultat)
+
+        ia_resultats.append(resultat)
+
+    # Les candidats IA marqués NON_PERTINENT sont ajoutés au groupe non pertinent
+    # par le code appelant.
+    nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
+    nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    print(f"Analyses IA effectuées : {analyses}")
+    print(
+        "Décisions IA : "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'NON_PERTINENT')} non pertinent / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible"
+    )
+
+    return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
+
+
+# ============================================================
 # SAUVEGARDE
 # ============================================================
 
@@ -816,6 +896,14 @@ def sauvegarder(
         "annee_detectee",
         "hors_perimetre",
         "hors_geographie",
+        "decision_ia",
+        "confiance_ia",
+        "raison_ia",
+        "categorie_ia",
+        "date_ia",
+        "departement_ia",
+        "ia_analyse",
+        "statut_final",
         "date_collecte",
     ]
 
@@ -879,6 +967,20 @@ def sauvegarder(
         encoding="utf-8-sig"
     )
 
+    # Fichier dédié à l'audit IA.
+    candidats_ia = [
+        r for r in tous
+        if r.get("ia_analyse") == "OUI"
+        or r.get("decision_ia") == "IA_INDISPONIBLE"
+        or r.get("decision_ia") == "IA_NON_ANALYSE"
+    ]
+
+    dataframe(candidats_ia).to_csv(
+        DATA / "resultats_ia.csv",
+        index=False,
+        encoding="utf-8-sig"
+    )
+
     return True
 
 
@@ -923,6 +1025,35 @@ def main():
     pertinents, a_verifier, non_pertinents = traiter(
         resultats_bruts
     )
+
+    # --------------------------------------------------------
+    # COUCHE IA
+    # --------------------------------------------------------
+    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
+        pertinents,
+        a_verifier
+    )
+
+    # Les candidats que l'IA déclare NON_PERTINENT restent dans
+    # non_pertinents. En cas d'indisponibilité de l'IA, on conserve
+    # la décision Python précédente pour ne jamais perdre de résultat.
+    non_pertinents_ia = []
+    for resultat in ia_resultats:
+        decision = resultat.get("decision_ia", "")
+        if decision == "NON_PERTINENT":
+            non_pertinents_ia.append(resultat)
+
+    # Éviter les doublons : les candidats IA remplacent leurs
+    # catégories Python initiales.
+    candidats_urls = {x.get("url") for x in (pertinents + a_verifier)}
+    non_pertinents_python = [
+        x for x in non_pertinents
+        if x.get("url") not in candidats_urls
+    ]
+
+    pertinents = pertinents_ia
+    a_verifier = a_verifier_ia
+    non_pertinents = non_pertinents_python + non_pertinents_ia
 
     total_dedoublonne = (
         len(pertinents)
