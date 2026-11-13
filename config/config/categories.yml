@@ -1,0 +1,49 @@
+categories:
+
+  1:
+    nom: "Salon étudiant / enseignement supérieur"
+    poids_cible: 20
+    mots_cles:
+      - "salon étudiant"
+      - "salon étudiants"
+      - "salon enseignement supérieur"
+      - "salon supérieur"
+      - "forum étudiant"
+      - "forum étudiants"
+      - "forum enseignement supérieur"
+      - "portes ouvertes"
+      - "journée portes ouvertes"
+      - "open day"
+      - "alumni"
+      - "rencontre alumni"
+      - "anciens élèves"
+      - "école d'ingénieurs"
+      - "école de commerce"
+      - "université"
+      - "faculté"
+
+  2:
+    nom: "Emploi / recrutement / formation"
+    poids_cible: 80
+    mots_cles:
+      - "salon emploi"
+      - "forum emploi"
+      - "forum de l'emploi"
+      - "forum recrutement"
+      - "salon recrutement"
+      - "job dating"
+      - "recrutement"
+      - "emploi"
+      - "emploi cadre"
+      - "emploi cadres"
+      - "formation"
+      - "formation professionnelle"
+      - "forum formation"
+      - "salon formation"
+      - "table ronde emploi"
+      - "table ronde recrutement"
+      - "conférence emploi"
+      - "conférence recrutement"
+      - "conférence carrière"
+      - "rencontre entreprises"
+      - "rencontre recruteurs"
