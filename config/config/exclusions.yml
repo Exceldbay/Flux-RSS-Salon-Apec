@@ -1,0 +1,33 @@
+exclusions:
+
+  fortes:
+    - "CCI"
+    - "chambre de commerce"
+    - "chambre de commerce et d'industrie"
+    - "cabinet de recrutement privé"
+    - "agence de recrutement"
+    - "cabinet recrutement"
+
+  public_non_cible:
+    - "collège"
+    - "collégien"
+    - "collégiens"
+    - "classe de collège"
+    - "lycée uniquement"
+    - "lycéen uniquement"
+    - "lycéens uniquement"
+    - "avant bac"
+    - "bac -3"
+
+  commerce_local:
+    - "marché"
+    - "braderie"
+    - "vide-grenier"
+    - "brocante"
+
+regles:
+
+  - "Ne pas exclure un événement uniquement parce que le mot lycée ou lycéen apparaît."
+  - "Un événement mixte peut rester pertinent s'il comporte une composante enseignement supérieur."
+  - "Ne pas supprimer automatiquement une source contenant plusieurs catégories."
+  - "Les événements CCI doivent être exclus lorsqu'ils sont organisés par la CCI."
