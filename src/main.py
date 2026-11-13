@@ -1,8 +1,9 @@
 from pathlib import Path
 from urllib.parse import quote_plus
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 import threading
+import re
 import time
 
 import feedparser
@@ -22,37 +23,30 @@ CONFIG = ROOT / "config"
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 
-# Nombre de recherches simultanées.
-# 12 = bon compromis vitesse / stabilité.
-MAX_WORKERS = 12
-
-# Timeout par requête.
-TIMEOUT = 10
-
-# Petite pause entre certaines opérations.
-RETRY_DELAY = 0.5
-
-# Nombre maximum de tentatives par requête.
+MAX_WORKERS = 16
+TIMEOUT = 8
 MAX_RETRIES = 2
+
+thread_local = threading.local()
 
 
 # ============================================================
-# CHARGEMENT CONFIGURATION
+# CHARGEMENT YAML
 # ============================================================
 
 def load_yaml(filename):
-    path = CONFIG / filename
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(
+        CONFIG / filename,
+        "r",
+        encoding="utf-8"
+    ) as f:
         return yaml.safe_load(f)
 
 
 # ============================================================
 # SESSION HTTP
 # ============================================================
-
-thread_local = threading.local()
-
 
 def get_session():
 
@@ -70,10 +64,9 @@ def get_session():
         session.mount("https://", adapter)
 
         session.headers.update({
-            "User-Agent": (
+            "User-Agent":
                 "Mozilla/5.0 "
-                "(compatible; Veille-APEC-RSS/1.0)"
-            )
+                "(compatible; Veille-APEC/1.0)"
         })
 
         thread_local.session = session
@@ -82,54 +75,239 @@ def get_session():
 
 
 # ============================================================
+# GROUPES DE RECHERCHE
+# ============================================================
+
+GROUPES_EMPLOI = [
+    [
+        "salon emploi",
+        "forum emploi",
+        "forum de l'emploi",
+        "job dating"
+    ],
+    [
+        "forum recrutement",
+        "salon recrutement",
+        "recrutement",
+        "rencontre recruteurs"
+    ],
+    [
+        "formation",
+        "formation professionnelle",
+        "salon formation",
+        "forum formation"
+    ],
+    [
+        "emploi cadre",
+        "emploi cadres",
+        "rencontre entreprises",
+        "conférence carrière"
+    ]
+]
+
+
+GROUPES_SUPERIEUR = [
+    [
+        "salon étudiant",
+        "salon étudiants",
+        "forum étudiant",
+        "forum étudiants"
+    ],
+    [
+        "enseignement supérieur",
+        "salon enseignement supérieur",
+        "salon supérieur",
+        "études supérieures"
+    ],
+    [
+        "portes ouvertes",
+        "journée portes ouvertes",
+        "open day",
+        "journée d'information"
+    ],
+    [
+        "alumni",
+        "rencontre alumni",
+        "anciens élèves",
+        "rencontre entreprises"
+    ]
+]
+
+
+# ============================================================
+# TERMES DE PERTINENCE
+# ============================================================
+
+TERMES_FORTS = [
+
+    "salon emploi",
+    "forum emploi",
+    "job dating",
+    "forum recrutement",
+    "salon recrutement",
+    "salon formation",
+    "forum formation",
+    "emploi cadre",
+    "emploi cadres",
+    "rencontre recruteurs",
+    "rencontre entreprises",
+    "salon étudiant",
+    "forum étudiant",
+    "enseignement supérieur",
+    "études supérieures",
+    "portes ouvertes",
+    "journée portes ouvertes",
+    "alumni",
+    "école d'ingénieurs",
+    "école de commerce",
+    "université",
+    "faculté"
+]
+
+
+TERMES_POSITIFS = [
+
+    "emploi",
+    "recrutement",
+    "formation",
+    "carrière",
+    "cadre",
+    "cadres",
+    "étudiant",
+    "étudiants",
+    "supérieur",
+    "université",
+    "école",
+    "ingénieur",
+    "ingénieurs",
+    "alumni",
+    "entreprise",
+    "entreprises",
+    "recruteur",
+    "recruteurs",
+    "alternance",
+    "apprentissage"
+]
+
+
+TERMES_BRUIT = [
+
+    "concert",
+    "spectacle",
+    "théâtre",
+    "festival",
+    "football",
+    "rugby",
+    "basket",
+    "marché",
+    "vide-grenier",
+    "brocante",
+    "braderie",
+    "patrimoine",
+    "exposition",
+    "agriculture",
+    "météo",
+    "faits divers",
+    "incendie",
+    "accident",
+    "politique",
+    "municipal",
+    "loisirs"
+]
+
+
+TERMES_EXCLUSION_FORTE = [
+
+    "chambre de commerce et d'industrie",
+    "chambre de commerce",
+    "cci",
+    "cabinet de recrutement privé",
+    "agence de recrutement"
+]
+
+
+# ============================================================
+# NORMALISATION
+# ============================================================
+
+def normaliser(texte):
+
+    texte = str(texte).lower()
+
+    texte = re.sub(
+        r"\s+",
+        " ",
+        texte
+    )
+
+    return texte.strip()
+
+
+# ============================================================
 # CONSTRUCTION DES REQUÊTES
 # ============================================================
 
-def construire_requetes(departements, categories):
+def construire_requetes(departements):
 
     requetes = []
+
+    groupes = [
+        (
+            1,
+            "Salon étudiant / enseignement supérieur",
+            GROUPES_SUPERIEUR
+        ),
+        (
+            2,
+            "Emploi / recrutement / formation",
+            GROUPES_EMPLOI
+        )
+    ]
 
     for code, nom in departements["departements"].items():
 
         for annee in departements["annees"]:
 
-            for numero, categorie in categories["categories"].items():
+            for numero, categorie, groupes_mots in groupes:
 
-                for mot_cle in categorie["mots_cles"]:
+                for groupe in groupes_mots:
+
+                    mots = " OR ".join(
+                        f'"{mot}"'
+                        for mot in groupe
+                    )
+
+                    texte = (
+                        f"({mots}) "
+                        f'"{nom}" '
+                        f"{annee}"
+                    )
 
                     requetes.append({
                         "departement": code,
                         "nom_departement": nom,
                         "annee": annee,
                         "categorie_numero": numero,
-                        "categorie": categorie["nom"],
-                        "mot_cle": mot_cle
+                        "categorie": categorie,
+                        "requete": texte
                     })
 
     return requetes
 
 
 # ============================================================
-# RECHERCHE GOOGLE NEWS RSS
+# RECHERCHE RSS
 # ============================================================
 
-def rechercher_google_news(requete):
-
-    texte = (
-        f'"{requete["mot_cle"]}" '
-        f'"{requete["nom_departement"]}" '
-        f'{requete["annee"]}'
-    )
+def rechercher(requete):
 
     url = (
         "https://news.google.com/rss/search?"
-        f"q={quote_plus(texte)}"
+        f"q={quote_plus(requete['requete'])}"
         "&hl=fr&gl=FR&ceid=FR:fr"
     )
 
     session = get_session()
-
-    derniere_erreur = None
 
     for tentative in range(MAX_RETRIES):
 
@@ -181,107 +359,177 @@ def rechercher_google_news(requete):
                     "titre": titre,
                     "url": lien,
                     "source": source,
-                    "date_publication": date_publication,
-                    "departement": requete["departement"],
-                    "nom_departement": requete["nom_departement"],
-                    "annee_recherchee": requete["annee"],
-                    "categorie_numero": requete["categorie_numero"],
-                    "categorie": requete["categorie"],
-                    "mot_cle": requete["mot_cle"]
+                    "date_publication":
+                        date_publication,
+                    "departement":
+                        requete["departement"],
+                    "nom_departement":
+                        requete["nom_departement"],
+                    "annee_recherchee":
+                        requete["annee"],
+                    "categorie_numero":
+                        requete["categorie_numero"],
+                    "categorie":
+                        requete["categorie"],
+                    "requete":
+                        requete["requete"]
                 })
 
-            return {
-                "statut": "OK",
-                "resultats": resultats
-            }
+            return resultats
 
-        except Exception as erreur:
-
-            derniere_erreur = str(erreur)
+        except Exception:
 
             if tentative < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY)
+                time.sleep(0.5)
 
-    return {
-        "statut": "ERREUR",
-        "resultats": [],
-        "erreur": derniere_erreur
-    }
+    return []
+
+
+# ============================================================
+# SCORE DE PERTINENCE
+# ============================================================
+
+def calculer_score(resultat):
+
+    texte = normaliser(
+        resultat["titre"]
+        + " "
+        + resultat["source"]
+    )
+
+    score = 0
+
+    # Termes très pertinents
+    for terme in TERMES_FORTS:
+
+        if terme in texte:
+            score += 15
+
+    # Termes positifs
+    for terme in TERMES_POSITIFS:
+
+        if terme in texte:
+            score += 3
+
+    # Bruit
+    for terme in TERMES_BRUIT:
+
+        if terme in texte:
+            score -= 8
+
+    # Exclusions fortes
+    for terme in TERMES_EXCLUSION_FORTE:
+
+        if terme in texte:
+            score -= 40
+
+    # Bonus catégorie
+    if resultat["categorie_numero"] == 1:
+
+        if any(
+            terme in texte
+            for terme in [
+                "université",
+                "école",
+                "étudiant",
+                "supérieur",
+                "alumni",
+                "portes ouvertes"
+            ]
+        ):
+            score += 10
+
+    if resultat["categorie_numero"] == 2:
+
+        if any(
+            terme in texte
+            for terme in [
+                "emploi",
+                "recrutement",
+                "formation",
+                "job dating",
+                "carrière"
+            ]
+        ):
+            score += 10
+
+    return score
+
+
+# ============================================================
+# CLASSIFICATION
+# ============================================================
+
+def classer(score):
+
+    if score >= 25:
+        return "Pertinent"
+
+    if score >= 10:
+        return "À vérifier"
+
+    return "Non pertinent"
+
+
+# ============================================================
+# EXCLUSIONS STRICTES
+# ============================================================
+
+def exclusion_forte(resultat):
+
+    texte = normaliser(
+        resultat["titre"]
+        + " "
+        + resultat["source"]
+    )
+
+    for terme in TERMES_EXCLUSION_FORTE:
+
+        if terme in texte:
+            return True, terme
+
+    return False, ""
 
 
 # ============================================================
 # DÉDOUBLONNAGE
 # ============================================================
 
-def supprimer_doublons(resultats):
+def dedoublonner(resultats):
 
-    uniques = {}
-    resultats_final = []
+    vus_url = set()
+    vus_titre = set()
+
+    uniques = []
 
     for resultat in resultats:
 
-        url = resultat.get("url", "").strip()
+        url = normaliser(
+            resultat["url"]
+        )
 
-        if not url:
+        titre = normaliser(
+            resultat["titre"]
+        )
+
+        titre_cle = re.sub(
+            r"[^a-z0-9àâäéèêëîïôöùûüç ]",
+            "",
+            titre
+        )
+
+        if url in vus_url:
             continue
 
-        if url not in uniques:
+        if titre_cle in vus_titre:
+            continue
 
-            uniques[url] = True
-            resultats_final.append(resultat)
+        vus_url.add(url)
+        vus_titre.add(titre_cle)
 
-    return resultats_final
+        uniques.append(resultat)
 
-
-# ============================================================
-# EXCLUSIONS
-# ============================================================
-
-def appliquer_exclusions(resultats, exclusions):
-
-    tous_termes = []
-
-    for groupe in exclusions["exclusions"].values():
-
-        if isinstance(groupe, list):
-            tous_termes.extend(groupe)
-
-    resultats_valides = []
-    resultats_exclus = []
-
-    for resultat in resultats:
-
-        texte = (
-            resultat.get("titre", "")
-            + " "
-            + resultat.get("source", "")
-        ).lower()
-
-        exclusion = False
-        terme_trouve = ""
-
-        for terme in tous_termes:
-
-            if terme.lower() in texte:
-
-                exclusion = True
-                terme_trouve = terme
-                break
-
-        if exclusion:
-
-            resultat["motif_exclusion"] = terme_trouve
-            resultat["statut"] = "Non pertinent"
-
-            resultats_exclus.append(resultat)
-
-        else:
-
-            resultat["statut"] = "À vérifier"
-
-            resultats_valides.append(resultat)
-
-    return resultats_valides, resultats_exclus
+    return uniques
 
 
 # ============================================================
@@ -291,256 +539,352 @@ def appliquer_exclusions(resultats, exclusions):
 def collecter(requetes):
 
     resultats = []
-    erreurs = 0
 
     total = len(requetes)
+    termine = 0
 
     debut = time.time()
 
     print()
     print("========================================")
-    print("COLLECTE PARALLÈLE")
+    print("COLLECTE RSS OPTIMISÉE")
     print("========================================")
-    print(f"Requêtes : {total}")
-    print(f"Connexions simultanées : {MAX_WORKERS}")
+    print(
+        f"Requêtes : {total}"
+    )
+    print(
+        f"Workers : {MAX_WORKERS}"
+    )
     print()
 
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS
     ) as executor:
 
-        futures = {
+        futures = [
             executor.submit(
-                rechercher_google_news,
+                rechercher,
                 requete
-            ): requete
+            )
             for requete in requetes
-        }
-
-        termine = 0
+        ]
 
         for future in as_completed(futures):
-
-            requete = futures[future]
 
             termine += 1
 
             try:
 
-                resultat = future.result()
+                nouveaux = future.result()
 
-                if resultat["statut"] == "OK":
-
-                    resultats.extend(
-                        resultat["resultats"]
-                    )
-
-                else:
-
-                    erreurs += 1
-
-            except Exception as erreur:
-
-                erreurs += 1
-
-                print(
-                    f"Erreur : "
-                    f"{requete['departement']} "
-                    f"{requete['annee']} "
-                    f"{erreur}"
+                resultats.extend(
+                    nouveaux
                 )
 
-            if termine % 25 == 0 or termine == total:
+            except Exception:
+                pass
 
-                duree = time.time() - debut
+            if (
+                termine % 20 == 0
+                or termine == total
+            ):
 
                 print(
                     f"Progression : "
                     f"{termine}/{total} "
-                    f"| résultats : {len(resultats)} "
-                    f"| erreurs : {erreurs} "
-                    f"| temps : {duree:.1f}s"
+                    f"| résultats : "
+                    f"{len(resultats)}"
                 )
 
     duree = time.time() - debut
 
     print()
     print(
-        f"Collecte terminée en {duree:.1f} secondes."
+        f"Collecte terminée en "
+        f"{duree:.1f} secondes"
     )
 
-    return resultats, erreurs
+    return resultats
+
+
+# ============================================================
+# TRAITEMENT
+# ============================================================
+
+def traiter(resultats):
+
+    resultats = dedoublonner(
+        resultats
+    )
+
+    pertinents = []
+    a_verifier = []
+    non_pertinents = []
+
+    for resultat in resultats:
+
+        exclusion, motif = (
+            exclusion_forte(
+                resultat
+            )
+        )
+
+        if exclusion:
+
+            resultat["score"] = -40
+            resultat["statut"] = (
+                "Non pertinent"
+            )
+            resultat["motif"] = motif
+
+            non_pertinents.append(
+                resultat
+            )
+
+            continue
+
+        score = calculer_score(
+            resultat
+        )
+
+        statut = classer(score)
+
+        resultat["score"] = score
+        resultat["statut"] = statut
+        resultat["motif"] = ""
+
+        if statut == "Pertinent":
+
+            pertinents.append(
+                resultat
+            )
+
+        elif statut == "À vérifier":
+
+            a_verifier.append(
+                resultat
+            )
+
+        else:
+
+            non_pertinents.append(
+                resultat
+            )
+
+    pertinents.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    a_verifier.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return (
+        pertinents,
+        a_verifier,
+        non_pertinents
+    )
 
 
 # ============================================================
 # SAUVEGARDE
 # ============================================================
 
-def sauvegarder(resultats_valides, resultats_exclus):
+def sauvegarder(
+    pertinents,
+    a_verifier,
+    non_pertinents
+):
 
-    maintenant = datetime.now().isoformat()
+    date_collecte = datetime.now().isoformat()
 
-    for resultat in resultats_valides:
-        resultat["date_collecte"] = maintenant
+    tous = (
+        pertinents
+        + a_verifier
+        + non_pertinents
+    )
 
-    for resultat in resultats_exclus:
-        resultat["date_collecte"] = maintenant
+    for resultat in tous:
 
-    fichier_resultats = (
+        resultat["date_collecte"] = (
+            date_collecte
+        )
+
+    colonnes = [
+        "titre",
+        "url",
+        "source",
+        "date_publication",
+        "departement",
+        "nom_departement",
+        "annee_recherchee",
+        "categorie_numero",
+        "categorie",
+        "score",
+        "statut",
+        "motif",
+        "requete",
+        "date_collecte"
+    ]
+
+    def dataframe(resultats):
+
+        df = pd.DataFrame(
+            resultats
+        )
+
+        for colonne in colonnes:
+
+            if colonne not in df.columns:
+                df[colonne] = ""
+
+        return df[colonnes]
+
+    fichier_principal = (
         DATA / "resultats_rss.csv"
     )
 
-    fichier_exclus = (
-        DATA / "resultats_exclus.csv"
+    fichier_verification = (
+        DATA / "a_verifier.csv"
     )
 
-    pd.DataFrame(
-        resultats_valides
+    fichier_non_pertinent = (
+        DATA / "non_pertinent.csv"
+    )
+
+    dataframe(
+        pertinents
     ).to_csv(
-        fichier_resultats,
+        fichier_principal,
         index=False,
         encoding="utf-8-sig"
     )
 
-    pd.DataFrame(
-        resultats_exclus
+    dataframe(
+        a_verifier
     ).to_csv(
-        fichier_exclus,
+        fichier_verification,
         index=False,
         encoding="utf-8-sig"
     )
 
-    return fichier_resultats, fichier_exclus
+    dataframe(
+        non_pertinents
+    ).to_csv(
+        fichier_non_pertinent,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    return (
+        fichier_principal,
+        fichier_verification,
+        fichier_non_pertinent
+    )
 
 
 # ============================================================
-# PROGRAMME PRINCIPAL
+# MAIN
 # ============================================================
 
 def main():
 
-    debut_total = time.time()
+    debut = time.time()
 
-    DATA.mkdir(exist_ok=True)
-    OUTPUT.mkdir(exist_ok=True)
+    DATA.mkdir(
+        exist_ok=True
+    )
+
+    OUTPUT.mkdir(
+        exist_ok=True
+    )
 
     print()
     print("========================================")
-    print("VEILLE APEC - COLLECTEUR RSS OPTIMISÉ")
+    print("VEILLE APEC")
+    print("COLLECTEUR OPTIMISÉ")
     print("========================================")
-
-    print("\nChargement de la configuration...")
 
     departements = load_yaml(
         "departements.yml"
     )
 
-    categories = load_yaml(
-        "categories.yml"
-    )
-
-    exclusions = load_yaml(
-        "exclusions.yml"
-    )
-
     requetes = construire_requetes(
-        departements,
-        categories
+        departements
     )
 
     print(
-        f"Nombre total de requêtes : "
+        f"\nRequêtes générées : "
         f"{len(requetes)}"
     )
 
-    # --------------------------------------------------------
-    # COLLECTE
-    # --------------------------------------------------------
-
-    resultats_bruts, erreurs = collecter(
+    # Collecte
+    resultats_bruts = collecter(
         requetes
     )
 
-    print()
-    print("========================================")
-    print("TRAITEMENT")
-    print("========================================")
-
     print(
-        f"Résultats bruts : "
+        f"\nRésultats bruts : "
         f"{len(resultats_bruts)}"
     )
 
-    # --------------------------------------------------------
-    # DÉDOUBLONNAGE
-    # --------------------------------------------------------
-
-    resultats_dedoublonnes = (
-        supprimer_doublons(
-            resultats_bruts
-        )
+    # Traitement
+    (
+        pertinents,
+        a_verifier,
+        non_pertinents
+    ) = traiter(
+        resultats_bruts
     )
-
-    print(
-        f"Après dédoublonnage : "
-        f"{len(resultats_dedoublonnes)}"
-    )
-
-    # --------------------------------------------------------
-    # EXCLUSIONS
-    # --------------------------------------------------------
-
-    resultats_valides, resultats_exclus = (
-        appliquer_exclusions(
-            resultats_dedoublonnes,
-            exclusions
-        )
-    )
-
-    print(
-        f"Résultats conservés : "
-        f"{len(resultats_valides)}"
-    )
-
-    print(
-        f"Résultats exclus : "
-        f"{len(resultats_exclus)}"
-    )
-
-    # --------------------------------------------------------
-    # SAUVEGARDE
-    # --------------------------------------------------------
-
-    fichier_resultats, fichier_exclus = (
-        sauvegarder(
-            resultats_valides,
-            resultats_exclus
-        )
-    )
-
-    duree_total = time.time() - debut_total
 
     print()
     print("========================================")
-    print("TERMINÉ")
+    print("RÉSULTATS")
     print("========================================")
 
+    print(
+        f"Pertinents : "
+        f"{len(pertinents)}"
+    )
+
+    print(
+        f"À vérifier : "
+        f"{len(a_verifier)}"
+    )
+
+    print(
+        f"Non pertinents : "
+        f"{len(non_pertinents)}"
+    )
+
+    # Sauvegarde
+    fichiers = sauvegarder(
+        pertinents,
+        a_verifier,
+        non_pertinents
+    )
+
+    duree = time.time() - debut
+
+    print()
+    print("========================================")
+    print("FICHIERS")
+    print("========================================")
+
+    for fichier in fichiers:
+        print(f"- {fichier}")
+
+    print()
     print(
         f"Temps total : "
-        f"{duree_total:.1f} secondes"
-    )
-
-    print(
-        f"Erreurs de requêtes : "
-        f"{erreurs}"
+        f"{duree:.1f} secondes"
     )
 
     print()
-    print("Fichiers créés :")
-    print(f"- {fichier_resultats}")
-    print(f"- {fichier_exclus}")
-
-    print()
+    print("========================================")
+    print("VEILLE TERMINÉE")
     print("========================================")
 
 
