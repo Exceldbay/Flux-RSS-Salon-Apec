@@ -30,11 +30,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Vérifier l'environnement
+        run: |
+          python --version
+          pip --version
+          echo "Démarrage de la veille APEC..."
+
       - name: Lancer le programme
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python src/main.py
+          python -u src/main.py
 
       - name: Enregistrer les résultats
         run: |
@@ -50,13 +56,7 @@ jobs:
 
           git commit -m "Mise à jour automatique de la veille"
 
-          git fetch origin main
-
-          git reset --soft origin/main
-
-          git add data/
-
-          git commit -m "Mise à jour automatique de la veille"
+          git pull --rebase origin main
 
           git push origin main
 
