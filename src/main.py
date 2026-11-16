@@ -800,12 +800,15 @@ def appliquer_ia(pertinents, a_verifier):
         if analyses >= MAX_IA_ANALYSES:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
-            resultat["raison_ia"] = "Limite quotidienne/préventive d'analyses atteinte."
+            resultat["raison_ia"] = "Limite maximale d'analyses IA atteinte."
             resultat["categorie_ia"] = ""
             resultat["date_ia"] = ""
             resultat["departement_ia"] = ""
             resultat["ia_analyse"] = "NON"
+            resultat["statut_final"] = "À vérifier"
+
             nouveaux_a_verifier.append(resultat)
+            ia_resultats.append(resultat)
             continue
 
         analyse = analyser_resultat(resultat)
@@ -821,7 +824,6 @@ def appliquer_ia(pertinents, a_verifier):
             nouveaux_pertinents.append(resultat)
         elif decision == "NON_PERTINENT":
             resultat["statut_final"] = "Non pertinent"
-            ia_resultats.append(resultat)
         else:
             resultat["statut_final"] = "À vérifier"
             nouveaux_a_verifier.append(resultat)
@@ -839,7 +841,8 @@ def appliquer_ia(pertinents, a_verifier):
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'NON_PERTINENT')} non pertinent / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible"
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_ANALYSE')} non analysé"
     )
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
