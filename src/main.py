@@ -298,7 +298,7 @@ def contient_terme(texte, termes):
 
 
 def extraire_annees(texte):
-    return sorted(set(re.findall(r"\b20(?:25|26|27|28)\b", normaliser(texte))))
+    return sorted(set(re.findall(r"\b20(?:26|27|28)\b", normaliser(texte))))
 
 
 def detecter_geographie(resultat):
