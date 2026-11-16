@@ -908,6 +908,7 @@ def traiter(resultats):
     non_pertinents = []
 
     for resultat in resultats:
+        corriger_departement_par_ville(resultat)
         score_data = calculer_score(resultat)
         resultat.update(score_data)
 
@@ -925,24 +926,74 @@ def traiter(resultats):
     return pertinents, a_verifier, non_pertinents
 
 
+
+def corriger_departement_par_ville(resultat):
+    """Corrige le département de recherche lorsqu'une ville cible unique
+    et explicitement reconnue apparaît dans le contenu RSS.
+
+    Cela évite qu'une requête lancée pour un département conserve ce code
+    lorsque l'article concerne en réalité un autre département cible.
+    """
+    texte = normaliser(
+        resultat.get("titre", "") + " " + resultat.get("description", "")
+    )
+
+    correspondances = []
+    for code, villes in VILLES_DEPARTEMENTS.items():
+        for ville in villes:
+            if ville and ville in texte:
+                correspondances.append(code)
+
+    codes = sorted(set(correspondances))
+
+    # Une seule correspondance départementale = correction sûre.
+    if len(codes) == 1:
+        code = codes[0]
+        resultat["departement"] = code
+        resultat["nom_departement"] = NOMS_DEPARTEMENTS.get(code, resultat.get("nom_departement", ""))
+        resultat["geographie_corrigee"] = "OUI"
+        return resultat
+
+    resultat["geographie_corrigee"] = "NON"
+    return resultat
+
+
+def normaliser_date_ia(date_ia):
+    """Conserve uniquement une date événement explicite au format ISO.
+
+    Une simple année comme 2026 n'est pas une date d'événement et est donc
+    volontairement laissée vide.
+    """
+    valeur = str(date_ia or "").strip()
+    if re.fullmatch(r"20(?:25|26|27)-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])", valeur):
+        return valeur
+    return ""
+
+
+def classer_statut_final(resultat, decision):
+    """Classement sécurisé : l'IA ne détruit jamais un statut Python fiable."""
+    statut_python = str(resultat.get("statut", "À vérifier"))
+
+    if decision == "PERTINENT":
+        resultat["statut_final"] = "Pertinent"
+    elif decision == "NON_PERTINENT":
+        resultat["statut_final"] = "Non pertinent"
+    else:
+        # IA indisponible, quota, conflit ou information insuffisante :
+        # on conserve la décision Python déjà obtenue.
+        resultat["statut_final"] = statut_python
+
+    return resultat
+
 # ============================================================
 # COUCHE IA GEMINI
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier):
-    """
-    Analyse les candidats avec Gemini sans bloquer le flux RSS.
-
-    Sécurité quota : dès qu'un 429 / RESOURCE_EXHAUSTED / quota est détecté,
-    aucun nouvel appel Gemini n'est effectué pour cette exécution.
-    Les candidats restants sont conservés comme IA_INDISPONIBLE.
-    """
+    """Analyse les candidats avec Gemini sans perdre les décisions Python."""
 
     candidats = pertinents + a_verifier
     candidats.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-    # Enrichissement uniquement des candidats susceptibles d'être analysés
-    # par Gemini, sans modifier le score Python déjà calculé.
     candidats = enrichir_candidats_ia(candidats)
 
     analyses = 0
@@ -959,6 +1010,11 @@ def appliquer_ia(pertinents, a_verifier):
     print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
 
     for resultat in candidats:
+        statut_python = str(resultat.get("statut", "À vérifier"))
+
+        # ----------------------------------------------------
+        # Plus d'appel après la limite de 50
+        # ----------------------------------------------------
         if analyses >= MAX_IA_ANALYSES:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
@@ -967,13 +1023,18 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["date_ia"] = ""
             resultat["departement_ia"] = ""
             resultat["ia_analyse"] = "NON"
-            resultat["statut_final"] = "À vérifier"
+            resultat["statut_final"] = statut_python
 
-            nouveaux_a_verifier.append(resultat)
             ia_resultats.append(resultat)
+            if statut_python == "Pertinent":
+                nouveaux_pertinents.append(resultat)
+            else:
+                nouveaux_a_verifier.append(resultat)
             continue
 
-        # Après un quota Gemini atteint, on ne fait plus aucun appel.
+        # ----------------------------------------------------
+        # Quota Gemini déjà atteint : zéro nouvel appel
+        # ----------------------------------------------------
         if quota_bloque:
             resultat["decision_ia"] = "IA_INDISPONIBLE"
             resultat["confiance_ia"] = 0
@@ -985,20 +1046,51 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["date_ia"] = ""
             resultat["departement_ia"] = ""
             resultat["ia_analyse"] = "NON"
-            resultat["statut_final"] = "À vérifier"
+            resultat["statut_final"] = statut_python
 
-            nouveaux_a_verifier.append(resultat)
             ia_resultats.append(resultat)
+            if statut_python == "Pertinent":
+                nouveaux_pertinents.append(resultat)
+            else:
+                nouveaux_a_verifier.append(resultat)
             continue
 
+        # ----------------------------------------------------
+        # Appel Gemini
+        # ----------------------------------------------------
         analyse = analyser_resultat(resultat)
         analyses += 1
-
         resultat.update(analyse)
-        decision = analyse.get("decision_ia", "IA_INDISPONIBLE")
+        resultat["ia_analyse"] = "OUI"
+
+        decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
         raison = str(analyse.get("raison_ia", "")).lower()
 
-        # Détection immédiate des erreurs de quota Gemini.
+        # Normalisation stricte de la date IA : une année seule n'est
+        # jamais enregistrée comme date d'événement.
+        resultat["date_ia"] = normaliser_date_ia(resultat.get("date_ia", ""))
+
+        # ----------------------------------------------------
+        # Protection département
+        # ----------------------------------------------------
+        dept_python = str(resultat.get("departement", "")).strip()
+        dept_ia = str(resultat.get("departement_ia", "")).strip()
+
+        if dept_python and dept_ia and dept_ia != dept_python:
+            resultat["raison_ia"] = (
+                str(resultat.get("raison_ia", ""))
+                + " | Conflit de département avec la détection Python : vérification requise."
+            ).strip(" |")
+            decision = "A_VERIFIER"
+            resultat["decision_ia"] = decision
+
+        if dept_ia and dept_ia not in {"16", "17", "19", "23", "79", "86", "87"}:
+            decision = "A_VERIFIER"
+            resultat["decision_ia"] = decision
+
+        # ----------------------------------------------------
+        # Détection immédiate des quotas
+        # ----------------------------------------------------
         quota_detecte = (
             decision == "IA_INDISPONIBLE"
             and any(
@@ -1016,25 +1108,32 @@ def appliquer_ia(pertinents, a_verifier):
 
         if quota_detecte:
             quota_bloque = True
-            resultat["ia_analyse"] = "NON"
-            resultat["statut_final"] = "À vérifier"
-            nouveaux_a_verifier.append(resultat)
-        else:
-            resultat["ia_analyse"] = "OUI"
+            # L'appel a bien été tenté, donc OUI, mais le résultat IA
+            # ne remplace jamais le statut Python.
+            resultat["statut_final"] = statut_python
 
-            if decision == "PERTINENT":
-                resultat["statut_final"] = "Pertinent"
+            ia_resultats.append(resultat)
+            if statut_python == "Pertinent":
                 nouveaux_pertinents.append(resultat)
-            elif decision == "NON_PERTINENT":
-                resultat["statut_final"] = "Non pertinent"
             else:
-                resultat["statut_final"] = "À vérifier"
                 nouveaux_a_verifier.append(resultat)
+            continue
+
+        # ----------------------------------------------------
+        # Décision IA normale
+        # ----------------------------------------------------
+        classer_statut_final(resultat, decision)
+
+        if decision == "PERTINENT":
+            nouveaux_pertinents.append(resultat)
+        elif decision == "NON_PERTINENT":
+            # Traité dans main() pour conserver le groupe non pertinent.
+            pass
+        else:
+            nouveaux_a_verifier.append(resultat)
 
         ia_resultats.append(resultat)
 
-    # Les candidats IA marqués NON_PERTINENT sont ajoutés au groupe non pertinent
-    # par le code appelant.
     nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
@@ -1117,6 +1216,7 @@ def sauvegarder(
         "categorie_ia",
         "date_ia",
         "departement_ia",
+        "geographie_corrigee",
         "ia_analyse",
         "statut_final",
         "date_collecte",
