@@ -11,6 +11,7 @@ import pandas as pd
 import yaml
 import requests
 from requests.adapters import HTTPAdapter
+from bs4 import BeautifulSoup
 
 from ia import analyser_resultat
 
@@ -495,6 +496,163 @@ def collecter(requetes):
 
 
 # ============================================================
+# ENRICHISSEMENT DES PAGES SOURCES
+# ============================================================
+
+def extraire_meta(soup, noms):
+    for nom in noms:
+        balise = soup.find("meta", attrs={"name": nom})
+        if balise and balise.get("content"):
+            return balise.get("content", "").strip()
+        balise = soup.find("meta", attrs={"property": nom})
+        if balise and balise.get("content"):
+            return balise.get("content", "").strip()
+    return ""
+
+
+def enrichir_page(resultat):
+    """
+    Récupère des informations complémentaires sur la page source.
+    L'enrichissement est limité aux candidats IA afin de ne pas
+    ralentir la collecte RSS.
+    """
+    url = resultat.get("url", "")
+    if not url:
+        return resultat
+
+    try:
+        session = get_session()
+        response = session.get(url, timeout=TIMEOUT, allow_redirects=True)
+        response.raise_for_status()
+
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "html" not in content_type:
+            return resultat
+
+        soup = BeautifulSoup(response.content, "lxml")
+
+        titre_page = soup.title.get_text(" ", strip=True) if soup.title else ""
+        description_page = extraire_meta(
+            soup, ["description", "og:description", "twitter:description"]
+        )
+        date_evenement = extraire_meta(
+            soup,
+            ["event:start_time", "event:start_date", "startDate",
+             "date", "datePublished"]
+        )
+        lieu_page = extraire_meta(
+            soup, ["event:location", "location", "place"]
+        )
+        organisateur_page = extraire_meta(
+            soup, ["author", "article:author", "og:site_name", "publisher"]
+        )
+
+        # Données structurées JSON-LD
+        import json
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or script.get_text())
+                elements = data if isinstance(data, list) else [data]
+
+                for element in elements:
+                    if not isinstance(element, dict):
+                        continue
+
+                    if not date_evenement:
+                        date_evenement = str(
+                            element.get("startDate")
+                            or element.get("datePublished")
+                            or ""
+                        ).strip()
+
+                    if not lieu_page:
+                        location = element.get("location", "")
+                        if isinstance(location, dict):
+                            lieu_page = str(
+                                location.get("name")
+                                or location.get("address")
+                                or ""
+                            ).strip()
+                        elif location:
+                            lieu_page = str(location).strip()
+
+                    if not organisateur_page:
+                        org = element.get("organizer", "")
+                        if isinstance(org, dict):
+                            organisateur_page = str(org.get("name") or "").strip()
+                        elif org:
+                            organisateur_page = str(org).strip()
+
+            except Exception:
+                continue
+
+        resultat["url_finale"] = response.url
+        resultat["titre_page"] = titre_page[:500]
+        resultat["description_page"] = normaliser(description_page)[:3000]
+        resultat["date_evenement_page"] = date_evenement[:100]
+        resultat["lieu_page"] = normaliser(lieu_page)[:300]
+        resultat["organisateur_page"] = normaliser(organisateur_page)[:300]
+        resultat["page_enrichie"] = "OUI"
+
+        # L'IA reçoit les informations complémentaires sans modifier
+        # le score Python déjà calculé.
+        enrichissement = " ".join(
+            x for x in [
+                titre_page,
+                description_page,
+                date_evenement,
+                lieu_page,
+                organisateur_page,
+            ] if x
+        )
+
+        if enrichissement:
+            resultat["description"] = (
+                normaliser(resultat.get("description", ""))
+                + " "
+                + normaliser(enrichissement)
+            ).strip()
+
+    except Exception as e:
+        resultat["page_enrichie"] = "NON"
+        resultat["erreur_enrichissement"] = str(e)[:300]
+
+    return resultat
+
+
+def enrichir_candidats_ia(candidats):
+    """
+    Enrichit uniquement les candidats susceptibles d'être analysés
+    par Gemini. Cela limite les requêtes HTTP supplémentaires.
+    """
+    print()
+    print("========================================")
+    print("ENRICHISSEMENT DES PAGES")
+    print("========================================")
+    print(f"Candidats à enrichir : {min(len(candidats), MAX_IA_ANALYSES)}")
+
+    debut = time.time()
+    cible = candidats[:MAX_IA_ANALYSES]
+
+    with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
+        futures = [executor.submit(enrichir_page, resultat) for resultat in cible]
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                pass
+
+    duree = time.time() - debut
+    enrichis = sum(1 for r in cible if r.get("page_enrichie") == "OUI")
+
+    print(f"Pages enrichies : {enrichis}/{len(cible)}")
+    print(f"Temps enrichissement : {duree:.1f} secondes")
+
+    return candidats
+
+
+# ============================================================
 # DÉDOUBLONNAGE
 # ============================================================
 
@@ -783,6 +941,10 @@ def appliquer_ia(pertinents, a_verifier):
     candidats = pertinents + a_verifier
     candidats.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+    # Enrichissement uniquement des candidats susceptibles d'être analysés
+    # par Gemini, sans modifier le score Python déjà calculé.
+    candidats = enrichir_candidats_ia(candidats)
+
     analyses = 0
     ia_resultats = []
     nouveaux_pertinents = []
@@ -872,6 +1034,14 @@ def sauvegarder(
         "url",
         "source",
         "description",
+        "url_finale",
+        "titre_page",
+        "description_page",
+        "date_evenement_page",
+        "lieu_page",
+        "organisateur_page",
+        "page_enrichie",
+        "erreur_enrichissement",
         "date_publication",
         "departement",
         "nom_departement",
