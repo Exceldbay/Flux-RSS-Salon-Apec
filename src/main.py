@@ -263,11 +263,10 @@ VILLES_DEPARTEMENTS = {
         "poitiers", "châtellerault", "chatellerault", "loudun",
         "civray", "montmorillon", "chasseneuil", "jaunay-marigny",
         "saint-benoît", "saint-benoit", "gençay", "gencay",
-        "saint-pardoux"
     ],
     "87": [
         "limoges", "panazol", "saint-junien", "bellac",
-        "isle", "couzeix", "ambazac"
+        "isle", "couzeix", "ambazac", "saint-pardoux"
     ],
 }
 
