@@ -931,11 +931,11 @@ def traiter(resultats):
 
 def appliquer_ia(pertinents, a_verifier):
     """
-    Analyse les candidats avec Gemini sans jamais bloquer le flux RSS.
+    Analyse les candidats avec Gemini sans bloquer le flux RSS.
 
-    Pour conserver le fonctionnement gratuit, on limite le nombre
-    d'analyses IA par exécution. Les candidats sont classés par score
-    Python décroissant afin de donner la priorité aux meilleurs signaux.
+    Sécurité quota : dès qu'un 429 / RESOURCE_EXHAUSTED / quota est détecté,
+    aucun nouvel appel Gemini n'est effectué pour cette exécution.
+    Les candidats restants sont conservés comme IA_INDISPONIBLE.
     """
 
     candidats = pertinents + a_verifier
@@ -949,6 +949,7 @@ def appliquer_ia(pertinents, a_verifier):
     ia_resultats = []
     nouveaux_pertinents = []
     nouveaux_a_verifier = []
+    quota_bloque = False
 
     print()
     print("========================================")
@@ -972,22 +973,63 @@ def appliquer_ia(pertinents, a_verifier):
             ia_resultats.append(resultat)
             continue
 
+        # Après un quota Gemini atteint, on ne fait plus aucun appel.
+        if quota_bloque:
+            resultat["decision_ia"] = "IA_INDISPONIBLE"
+            resultat["confiance_ia"] = 0
+            resultat["raison_ia"] = (
+                "Quota Gemini atteint ou indisponible : "
+                "aucun nouvel appel IA effectué."
+            )
+            resultat["categorie_ia"] = ""
+            resultat["date_ia"] = ""
+            resultat["departement_ia"] = ""
+            resultat["ia_analyse"] = "NON"
+            resultat["statut_final"] = "À vérifier"
+
+            nouveaux_a_verifier.append(resultat)
+            ia_resultats.append(resultat)
+            continue
+
         analyse = analyser_resultat(resultat)
         analyses += 1
 
         resultat.update(analyse)
-        resultat["ia_analyse"] = "OUI"
-
         decision = analyse.get("decision_ia", "IA_INDISPONIBLE")
+        raison = str(analyse.get("raison_ia", "")).lower()
 
-        if decision == "PERTINENT":
-            resultat["statut_final"] = "Pertinent"
-            nouveaux_pertinents.append(resultat)
-        elif decision == "NON_PERTINENT":
-            resultat["statut_final"] = "Non pertinent"
-        else:
+        # Détection immédiate des erreurs de quota Gemini.
+        quota_detecte = (
+            decision == "IA_INDISPONIBLE"
+            and any(
+                terme in raison
+                for terme in (
+                    "429",
+                    "resource_exhausted",
+                    "resource exhausted",
+                    "quota",
+                    "rate limit",
+                    "too many requests",
+                )
+            )
+        )
+
+        if quota_detecte:
+            quota_bloque = True
+            resultat["ia_analyse"] = "NON"
             resultat["statut_final"] = "À vérifier"
             nouveaux_a_verifier.append(resultat)
+        else:
+            resultat["ia_analyse"] = "OUI"
+
+            if decision == "PERTINENT":
+                resultat["statut_final"] = "Pertinent"
+                nouveaux_pertinents.append(resultat)
+            elif decision == "NON_PERTINENT":
+                resultat["statut_final"] = "Non pertinent"
+            else:
+                resultat["statut_final"] = "À vérifier"
+                nouveaux_a_verifier.append(resultat)
 
         ia_resultats.append(resultat)
 
@@ -997,6 +1039,7 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     print(f"Analyses IA effectuées : {analyses}")
+    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}")
     print(
         "Décisions IA : "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
