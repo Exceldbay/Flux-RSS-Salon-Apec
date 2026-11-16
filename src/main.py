@@ -923,6 +923,17 @@ def sauvegarder(
     OUTPUT.mkdir(exist_ok=True)
 
     dataframe(pertinents).to_csv(
+        candidats_ia.sort(
+    key=lambda x: (
+        0 if x.get("decision_ia") == "PERTINENT" else
+        1 if x.get("decision_ia") == "A_VERIFIER" else
+        2 if x.get("decision_ia") == "IA_INDISPONIBLE" else
+        3,
+        -int(x.get("confiance_ia", 0) or 0)
+        if x.get("decision_ia") == "PERTINENT"
+        else -int(x.get("score", 0) or 0)
+    )
+)
         DATA / "resultats_rss.csv",
         index=False,
         encoding="utf-8-sig"
