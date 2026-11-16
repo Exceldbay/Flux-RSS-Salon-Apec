@@ -31,8 +31,12 @@ def analyser_resultat(resultat):
         description = resultat.get("description", "")
         source = resultat.get("source", "")
         url = resultat.get("url", "")
-        date = resultat.get("date", "")
-        departement = resultat.get("departement", "")
+        date = resultat.get("date_publication", "")
+annee_recherchee = resultat.get("annee_recherchee", "")
+annee_detectee = resultat.get("annee_detectee", "")
+departement = resultat.get("departement", "")
+evenement_detecte = resultat.get("evenement_detecte", "")
+geographie_verifiee = resultat.get("geographie_verifiee", "")
 
         prompt = f"""
 Tu es un analyste spécialisé dans la veille événementielle pour l'Apec.
@@ -86,6 +90,18 @@ Date :
 
 Département détecté :
 {departement}
+
+Année recherchée :
+{annee_recherchee}
+
+Année détectée :
+{annee_detectee}
+
+Événement détecté :
+{evenement_detecte}
+
+Géographie vérifiée :
+{geographie_verifiee}
 
 URL :
 {url}
