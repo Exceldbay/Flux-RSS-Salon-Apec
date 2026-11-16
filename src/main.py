@@ -923,17 +923,6 @@ def sauvegarder(
     OUTPUT.mkdir(exist_ok=True)
 
     dataframe(pertinents).to_csv(
-        candidats_ia.sort(
-    key=lambda x: (
-        0 if x.get("decision_ia") == "PERTINENT" else
-        1 if x.get("decision_ia") == "A_VERIFIER" else
-        2 if x.get("decision_ia") == "IA_INDISPONIBLE" else
-        3,
-        -int(x.get("confiance_ia", 0) or 0)
-        if x.get("decision_ia") == "PERTINENT"
-        else -int(x.get("score", 0) or 0)
-    )
-)
         DATA / "resultats_rss.csv",
         index=False,
         encoding="utf-8-sig"
@@ -988,6 +977,28 @@ def sauvegarder(
         or r.get("decision_ia") == "IA_INDISPONIBLE"
         or r.get("decision_ia") == "IA_NON_ANALYSE"
     ]
+
+    def cle_tri_ia(resultat):
+        decision = resultat.get("decision_ia", "")
+
+        if decision == "PERTINENT":
+            return (
+                0,
+                -int(resultat.get("confiance_ia", 0) or 0)
+            )
+
+        if decision == "A_VERIFIER":
+            return (
+                1,
+                -int(resultat.get("score", 0) or 0)
+            )
+
+        if decision == "IA_INDISPONIBLE":
+            return (2, 0)
+
+        return (3, 0)
+
+    candidats_ia.sort(key=cle_tri_ia)
 
     dataframe(candidats_ia).to_csv(
         DATA / "resultats_ia.csv",
