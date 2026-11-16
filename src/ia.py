@@ -31,14 +31,18 @@ def analyser_resultat(resultat):
         description = resultat.get("description", "")
         source = resultat.get("source", "")
         url = resultat.get("url", "")
+
+        # Données temporelles et géographiques
         date = resultat.get("date_publication", "")
         annee_recherchee = resultat.get("annee_recherchee", "")
         annee_detectee = resultat.get("annee_detectee", "")
         departement = resultat.get("departement", "")
+
+        # Informations déjà détectées par le programme Python
         evenement_detecte = resultat.get("evenement_detecte", "")
         geographie_verifiee = resultat.get("geographie_verifiee", "")
+
         prompt = f"""
-        
 Tu es un analyste spécialisé dans la veille événementielle pour l'Apec.
 
 Tu dois déterminer si l'événement suivant est pertinent pour une veille
@@ -64,6 +68,7 @@ Années recherchées :
 2025, 2026, 2027
 
 Règles importantes :
+
 - Ne jamais inventer une information.
 - Un événement doit réellement être identifiable.
 - Un événement uniquement collège/lycée n'est pas pertinent.
@@ -73,8 +78,17 @@ Règles importantes :
 - Si les informations sont insuffisantes pour décider, utiliser A_VERIFIER.
 - Si l'événement est clairement hors périmètre, utiliser NON_PERTINENT.
 - Si l'événement correspond clairement au périmètre Apec, utiliser PERTINENT.
+- Vérifier attentivement l'année de l'événement.
+- Ne pas confondre la date de publication de l'article avec la date de
+  l'événement.
+- Ne jamais transformer une année de publication en année d'événement.
+- Si la date ou l'année de l'événement n'est pas certaine, utiliser
+  A_VERIFIER.
+- Vérifier que le département correspond à la zone géographique cible.
+- Si une information fournie par le programme Python est vide ou incertaine,
+  ne pas l'inventer.
 
-DONNÉES :
+DONNÉES DU RÉSULTAT RSS :
 
 Titre :
 {titre}
@@ -85,17 +99,17 @@ Description :
 Source :
 {source}
 
-Date :
+Date de publication :
 {date}
-
-Département détecté :
-{departement}
 
 Année recherchée :
 {annee_recherchee}
 
 Année détectée :
 {annee_detectee}
+
+Département détecté :
+{departement}
 
 Événement détecté :
 {evenement_detecte}
@@ -105,6 +119,15 @@ Géographie vérifiée :
 
 URL :
 {url}
+
+Analyse demandée :
+
+1. Déterminer si l'événement est PERTINENT, A_VERIFIER ou NON_PERTINENT.
+2. Vérifier sa catégorie.
+3. Vérifier l'année de l'événement si elle est disponible.
+4. Vérifier le département si l'information est disponible.
+5. Ne jamais inventer une date ou un département.
+6. Donner une raison courte et factuelle.
 
 Réponds UNIQUEMENT avec un JSON valide ayant exactement cette structure :
 
@@ -118,7 +141,13 @@ Réponds UNIQUEMENT avec un JSON valide ayant exactement cette structure :
 }}
 
 Le champ confiance doit être un entier entre 0 et 100.
+
+Le champ date doit contenir uniquement la date de l'événement si elle est
+explicitement identifiable.
+
 Ne complète pas une information inconnue.
+
+Ne mets aucun texte avant ou après le JSON.
 """
 
         response = client.models.generate_content(
