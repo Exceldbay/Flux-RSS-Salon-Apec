@@ -32,13 +32,13 @@ def analyser_resultat(resultat):
         source = resultat.get("source", "")
         url = resultat.get("url", "")
         date = resultat.get("date_publication", "")
-annee_recherchee = resultat.get("annee_recherchee", "")
-annee_detectee = resultat.get("annee_detectee", "")
-departement = resultat.get("departement", "")
-evenement_detecte = resultat.get("evenement_detecte", "")
-geographie_verifiee = resultat.get("geographie_verifiee", "")
-
+        annee_recherchee = resultat.get("annee_recherchee", "")
+        annee_detectee = resultat.get("annee_detectee", "")
+        departement = resultat.get("departement", "")
+        evenement_detecte = resultat.get("evenement_detecte", "")
+        geographie_verifiee = resultat.get("geographie_verifiee", "")
         prompt = f"""
+        
 Tu es un analyste spécialisé dans la veille événementielle pour l'Apec.
 
 Tu dois déterminer si l'événement suivant est pertinent pour une veille
