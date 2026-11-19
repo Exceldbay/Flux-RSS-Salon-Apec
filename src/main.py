@@ -31,6 +31,8 @@ MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
 MAX_IA_ANALYSES = 50
+# Délai minimal entre deux requêtes Gemini.
+IA_COOLDOWN_SECONDS = 5
 
 thread_local = threading.local()
 
@@ -1093,6 +1095,18 @@ def appliquer_ia(pertinents, a_verifier):
             else:
                 nouveaux_a_verifier.append(resultat)
             continue
+
+        # ----------------------------------------------------
+        # Cooldown entre les requêtes Gemini
+        # ----------------------------------------------------
+        # Aucun délai avant le premier appel.
+        # À partir du deuxième appel, on impose 5 secondes minimum
+        # entre deux requêtes afin de réduire les risques de 429.
+        if analyses > 0:
+            print(
+                f"⏳ Cooldown Gemini : {IA_COOLDOWN_SECONDS} secondes..."
+            )
+            time.sleep(IA_COOLDOWN_SECONDS)
 
         # ----------------------------------------------------
         # Appel Gemini
