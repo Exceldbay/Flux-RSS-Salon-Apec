@@ -46,7 +46,6 @@ EVENT_HEADERS = {
     "Date fin (ou 2e date distincte)",
     "Lieu",
     "Détails et récurrence",
-    "Statut au 12/11/2026",
     "Prochaine édition connue",
     "Apec présent",
     "Source (lien)",
@@ -168,12 +167,24 @@ def require_sheet(wb, sheet_name):
     return wb[sheet_name]
 
 
-def require_headers(ws, required_headers):
+def require_headers(ws, required_headers, check_status=False):
     headers = get_headers(ws)
     missing = [
         header for header in required_headers
         if header not in headers
     ]
+
+    # Le libellé de la colonne de statut contient une date qui évolue
+    # avec les versions du classeur. On accepte donc n'importe quelle
+    # colonne de la forme "Statut au JJ/MM/AAAA".
+    if check_status:
+        status_headers = [
+            header for header in headers
+            if norm(header).startswith("statut au ")
+        ]
+        if not status_headers:
+            missing.append("une colonne 'Statut au JJ/MM/AAAA'")
+
     if missing:
         raise ValueError(
             f"Colonnes manquantes dans '{ws.title}' : "
@@ -480,12 +491,18 @@ def write_event_row(ws, row_number, data, update_existing=False):
 
     # Pour une ligne existante, on ne remplace pas les champs
     # éditoriaux manuels si la nouvelle information est vide.
+    status_header = next(
+        (name for name in headers if norm(name).startswith("statut au ")),
+        None,
+    )
+
     optional_values = {
         "Lieu": data["location"],
         "Détails et récurrence": data["details"],
-        "Statut au 12/11/2026": data["status"],
         "Apec présent": data["apec"],
     }
+    if status_header:
+        optional_values[status_header] = data["status"]
 
     for name, value in values.items():
         col = headers.get(name)
@@ -674,13 +691,22 @@ def validate_workbook(wb):
     require_headers(
         wb[CHRONOLOGY_SHEET],
         CHRONO_HEADERS,
+        check_status=False,
     )
 
     for sheet_name in YEAR_SHEETS.values():
-        require_headers(wb[sheet_name], EVENT_HEADERS)
+        require_headers(
+            wb[sheet_name],
+            EVENT_HEADERS,
+            check_status=True,
+        )
 
     for sheet_name in DEPT_SHEETS.values():
-        require_headers(wb[sheet_name], EVENT_HEADERS)
+        require_headers(
+            wb[sheet_name],
+            EVENT_HEADERS,
+            check_status=True,
+        )
 
     require_headers(
         wb[NON_PERTINENT_SHEET],
@@ -801,7 +827,42 @@ def main():
             stats["non_verifiable_ajoute"] += 1
             continue
 
-        if data["year"] not in YEAR_SHEETS:
+        if not data["year"]:
+            append_audit_row(
+                wb[NON_VERIFIABLE_SHEET],
+                data["title"],
+                "Année d'événement non vérifiée.",
+            )
+            stats["non_verifiable_ajoute"] += 1
+            continue
+
+        dept_sheet = DEPT_SHEETS.get(data["department"])
+        if not dept_sheet:
+            append_audit_row(
+                wb[NON_VERIFIABLE_SHEET],
+                data["title"],
+                "Département non vérifié.",
+            )
+            stats["non_verifiable_ajoute"] += 1
+            continue
+
+        # 2026/2027 : feuille d'année + feuille départementale.
+        # 2025 : le classeur ne possède pas de feuille d'année 2025,
+        # mais l'événement reste valide et doit être conservé dans
+        # sa feuille départementale.
+        if data["year"] in YEAR_SHEETS:
+            year_sheet = YEAR_SHEETS[data["year"]]
+            result = update_or_append_event(
+                wb[year_sheet],
+                data,
+                indexes[year_sheet],
+            )
+
+            if result == "added":
+                stats["ajoutes"] += 1
+            else:
+                stats["mis_a_jour"] += 1
+        elif data["year"] != "2025":
             append_audit_row(
                 wb[NON_VERIFIABLE_SHEET],
                 data["title"],
@@ -809,20 +870,6 @@ def main():
             )
             stats["non_verifiable_ajoute"] += 1
             continue
-
-        year_sheet = YEAR_SHEETS[data["year"]]
-        dept_sheet = DEPT_SHEETS[data["department"]]
-
-        result = update_or_append_event(
-            wb[year_sheet],
-            data,
-            indexes[year_sheet],
-        )
-
-        if result == "added":
-            stats["ajoutes"] += 1
-        else:
-            stats["mis_a_jour"] += 1
 
         # Même événement dans la feuille départementale.
         result = update_or_append_event(
