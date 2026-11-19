@@ -1,0 +1,18 @@
+{
+  "date_execution": "2026-11-19T15:40:24.655698",
+  "statut": "SUCCES",
+  "resultats_rss": 989,
+  "evenements_pertinents": 18,
+  "a_verifier": 25,
+  "non_pertinents": 612,
+  "analyses_ia": 50,
+  "erreurs": 0,
+  "sauvegarde_git": true,
+  "excel_synchronise": true,
+  "duree_secondes": 1787.3,
+  "excel_url": "https://github.com/Exceldbay/Flux-RSS-Salon-Apec/blob/main/data/Apec_Salons_Evenements.xlsx",
+  "resultats_ia_url": "https://github.com/Exceldbay/Flux-RSS-Salon-Apec/blob/main/data/resultats_ia.csv",
+  "resultats_rss_url": "https://github.com/Exceldbay/Flux-RSS-Salon-Apec/blob/main/data/resultats_rss.csv",
+  "a_verifier_url": "https://github.com/Exceldbay/Flux-RSS-Salon-Apec/blob/main/data/a_verifier.csv",
+  "workflow_url": "https://github.com/Exceldbay/Flux-RSS-Salon-Apec/actions"
+}
