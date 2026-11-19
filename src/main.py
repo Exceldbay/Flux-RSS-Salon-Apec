@@ -18,11 +18,34 @@ from bs4 import BeautifulSoup
 from ia import analyser_resultat
 
 
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "config"
+DATA = ROOT / "data"
+OUTPUT = ROOT / "output"
+
+MAX_WORKERS = 16
+TIMEOUT = 10
+MAX_RETRIES = 2
+MAX_IA_ANALYSES = 50
+
+thread_local = threading.local()
+
+
+# ============================================================
+# CHARGEMENT CONFIGURATION
+# ============================================================
+
+def load_yaml(filename):
+    with open(CONFIG / filename, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def synchroniser_excel():
-    """
-    Lance le synchroniseur Excel après la génération de resultats_ia.csv.
-    Le synchroniseur est exécuté avec le même interpréteur Python que main.py.
-    """
+    """Lance le synchroniseur Excel après la génération des CSV."""
     script = ROOT / "src" / "synchroniser_excel.py"
 
     print()
@@ -56,32 +79,6 @@ def synchroniser_excel():
     except Exception as e:
         print(f"⚠️ Erreur lors du lancement du synchroniseur : {e}")
         return False
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-ROOT = Path(__file__).resolve().parent.parent
-CONFIG = ROOT / "config"
-DATA = ROOT / "data"
-OUTPUT = ROOT / "output"
-
-MAX_WORKERS = 16
-TIMEOUT = 10
-MAX_RETRIES = 2
-MAX_IA_ANALYSES = 50
-
-thread_local = threading.local()
-
-
-# ============================================================
-# CHARGEMENT CONFIGURATION
-# ============================================================
-
-def load_yaml(filename):
-    with open(CONFIG / filename, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 # ============================================================
@@ -1454,7 +1451,6 @@ def main():
     )
 
     synchronisation_ok = False
-
     if sauvegarde_ok:
         synchronisation_ok = synchroniser_excel()
 
