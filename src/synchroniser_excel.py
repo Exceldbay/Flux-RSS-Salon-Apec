@@ -256,11 +256,40 @@ def choose_decision(row):
     return "A_VERIFIER"
 
 
+def is_generic_title(value):
+    """Retourne True si le titre est un titre générique de moteur/source."""
+    value = clean(value)
+    if not value:
+        return False
+
+    normalized = norm(value)
+    generic_exact = {
+        "google news",
+        "google actualites",
+        "google actualites france",
+    }
+
+    if normalized in generic_exact:
+        return True
+
+    # Cas fréquents : "Google News - ..." / "Google Actualités - ..."
+    return normalized.startswith("google news -") or normalized.startswith("google actualites -")
+
+
 def choose_title(row):
-    return (
-        clean(row.get("titre_page"))
-        or clean(row.get("titre"))
-    )
+    """Choisit le vrai titre d'événement, en écartant les titres génériques."""
+    titre_page = clean(row.get("titre_page"))
+    titre_rss = clean(row.get("titre"))
+
+    if titre_page and not is_generic_title(titre_page):
+        return titre_page
+
+    if titre_rss and not is_generic_title(titre_rss):
+        return titre_rss
+
+    # Aucun titre exploitable : le synchroniseur le classera
+    # en "Non vérifiable" au lieu de l'injecter dans les feuilles d'événements.
+    return ""
 
 
 def choose_source(row):
@@ -813,7 +842,20 @@ def main():
             continue
 
         if not data["title"]:
-            stats["ignores"] += 1
+            # Un titre générique (ex. "Google News") ou absent ne doit
+            # jamais entrer dans les feuilles d'événements.
+            audit_title = clean(
+                raw.get("titre_page")
+                or raw.get("titre")
+                or raw.get("url")
+                or "Titre non identifié"
+            )
+            append_audit_row(
+                wb[NON_VERIFIABLE_SHEET],
+                audit_title,
+                "Titre réel de l'événement non identifiable (titre générique de source ou titre absent).",
+            )
+            stats["non_verifiable_ajoute"] += 1
             continue
 
         if not data["department"]:
