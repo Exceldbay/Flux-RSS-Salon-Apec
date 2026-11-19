@@ -2,19 +2,23 @@ name: Veille APEC
 
 on:
   workflow_dispatch:
-
   schedule:
     - cron: "0 5 * * *"
 
 permissions:
   contents: write
 
+# Évite que deux exécutions automatiques modifient les mêmes fichiers
+# en même temps.
+concurrency:
+  group: veille-apec
+  cancel-in-progress: false
+
 jobs:
   recherche:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
         with:
@@ -43,9 +47,29 @@ jobs:
           python -u src/main.py
 
       - name: Enregistrer les résultats
+        shell: bash
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Les fichiers de data viennent d'être générés par cette exécution.
+          # On les conserve temporairement afin de pouvoir resynchroniser
+          # proprement avec la dernière version de main sans conflit Git.
+          rm -rf /tmp/veille_apec_data
+          cp -a data /tmp/veille_apec_data
+
+          # Récupère l'état le plus récent du dépôt.
+          git fetch origin main
+
+          # Repart de la dernière version distante pour éviter les conflits
+          # sur le fichier Excel et les CSV générés automatiquement.
+          git reset --hard origin/main
+
+          # Réinjecte les résultats produits par cette exécution.
+          rm -rf data
+          cp -a /tmp/veille_apec_data data
 
           git add data/
 
@@ -56,9 +80,28 @@ jobs:
 
           git commit -m "Mise à jour automatique de la veille"
 
-          git pull --rebase origin main
+          # Nouvelle vérification avant l'envoi, au cas où le dépôt aurait
+          # changé pendant le traitement.
+          git fetch origin main
 
-          git push origin main
+          if ! git diff --quiet HEAD origin/main; then
+            echo "Le dépôt distant a changé pendant le traitement."
+            echo "Rebase impossible sans risquer un conflit sur les données générées."
+            echo "On repart de origin/main et on réapplique les données de cette exécution."
+
+            rm -rf /tmp/veille_apec_data_final
+            cp -a data /tmp/veille_apec_data_final
+
+            git reset --hard origin/main
+
+            rm -rf data
+            cp -a /tmp/veille_apec_data_final data
+
+            git add data/
+            git commit -m "Mise à jour automatique de la veille"
+          fi
+
+          git push origin HEAD:main
 
       - name: Fin du workflow
         run: |
