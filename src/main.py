@@ -1375,6 +1375,86 @@ def sauvegarder(
 
 
 # ============================================================
+# NOTIFICATION TEAMS / POWER AUTOMATE
+# ============================================================
+
+GITHUB_REPO_URL = "https://github.com/Exceldbay/Flux-RSS-Salon-Apec"
+GITHUB_BRANCH = "main"
+
+
+def generer_notification_teams(
+    resultats_bruts,
+    pertinents,
+    a_verifier,
+    non_pertinents,
+    ia_resultats,
+    erreurs,
+    sauvegarde_ok,
+    synchronisation_ok,
+    duree_total,
+):
+    """
+    Génère un JSON simple à lire depuis Power Automate.
+    Les URLs pointent directement vers les fichiers du dépôt GitHub.
+    """
+    notification = {
+        "date_execution": datetime.now().isoformat(),
+        "statut": "SUCCES" if sauvegarde_ok and synchronisation_ok else "ATTENTION",
+        "resultats_rss": len(resultats_bruts),
+        "evenements_pertinents": len(pertinents),
+        "a_verifier": len(a_verifier),
+        "non_pertinents": len(non_pertinents),
+        "analyses_ia": sum(
+            1 for x in ia_resultats
+            if x.get("decision_ia") not in ("IA_NON_ANALYSE", "")
+        ),
+        "erreurs": len(erreurs) if isinstance(erreurs, (list, tuple, dict, set)) else erreurs,
+        "sauvegarde_git": bool(sauvegarde_ok),
+        "excel_synchronise": bool(synchronisation_ok),
+        "duree_secondes": round(duree_total, 1),
+
+        "excel_url": (
+            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
+            "data/Apec_Salons_Evenements.xlsx"
+        ),
+        "resultats_ia_url": (
+            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
+            "data/resultats_ia.csv"
+        ),
+        "resultats_rss_url": (
+            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
+            "data/resultats_rss.csv"
+        ),
+        "a_verifier_url": (
+            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
+            "data/a_verifier.csv"
+        ),
+        "workflow_url": (
+            f"{GITHUB_REPO_URL}/actions"
+        ),
+    }
+
+    chemin = DATA / "notification_teams.json"
+    chemin.write_text(
+        json.dumps(notification, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    print()
+    print("========================================")
+    print("NOTIFICATION POWER AUTOMATE / TEAMS")
+    print("========================================")
+    print(f"Fichier généré : {chemin}")
+    print(f"Statut : {notification['statut']}")
+    print(f"Excel synchronisé : {notification['excel_synchronise']}")
+    print(f"Événements pertinents : {notification['evenements_pertinents']}")
+    print(f"À vérifier : {notification['a_verifier']}")
+    print(f"URL Excel : {notification['excel_url']}")
+
+    return True
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -1483,6 +1563,26 @@ def main():
     print(
         "Synchronisation Excel : "
         f"{'OUI' if synchronisation_ok else 'NON'}"
+    )
+
+    # Génère le fichier de synthèse consommable par Power Automate.
+    # Il est créé après la synchronisation afin que son statut reflète
+    # réellement l'exécution complète.
+    notification_ok = generer_notification_teams(
+        resultats_bruts=resultats_bruts,
+        pertinents=pertinents,
+        a_verifier=a_verifier,
+        non_pertinents=non_pertinents,
+        ia_resultats=ia_resultats,
+        erreurs=erreurs,
+        sauvegarde_ok=sauvegarde_ok,
+        synchronisation_ok=synchronisation_ok,
+        duree_total=duree_total,
+    )
+
+    print(
+        "Notification Teams préparée : "
+        f"{'OUI' if notification_ok else 'NON'}"
     )
 
     print()
