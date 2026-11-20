@@ -71,6 +71,7 @@ MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
 MAX_IA_ANALYSES = 50
+IA_COOLDOWN_SECONDS = 15
 
 thread_local = threading.local()
 
