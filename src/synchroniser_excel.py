@@ -168,6 +168,37 @@ def require_sheet(wb, sheet_name):
     return wb[sheet_name]
 
 
+def ensure_event_headers(ws):
+    """Répare les anciens onglets événement dont le statut Apec manque."""
+    headers = get_headers(ws)
+    status_header = "Statut au 12/11/2026"
+
+    if status_header in headers:
+        return headers
+
+    # On insère le statut avant "Prochaine édition connue" pour conserver
+    # l'ordre historique des colonnes et la mise en forme du classeur.
+    anchor = (
+        headers.get("Prochaine édition connue")
+        or headers.get("Apec présent")
+        or (ws.max_column + 1)
+    )
+
+    ws.insert_cols(anchor, 1)
+    ws.cell(1, anchor).value = status_header
+
+    # Recopie du style de l'en-tête voisin.
+    source_col = anchor + 1 if anchor < ws.max_column else max(anchor - 1, 1)
+    source = ws.cell(1, source_col)
+    target = ws.cell(1, anchor)
+    if source.has_style:
+        target._style = copy(source._style)
+    target.alignment = copy(source.alignment)
+    target.protection = copy(source.protection)
+
+    return get_headers(ws)
+
+
 def require_headers(ws, required_headers):
     headers = get_headers(ws)
     missing = [
@@ -260,6 +291,95 @@ ALLOWED_CATEGORIES = {
     "portes_ouvertes",
 }
 
+# CIBLE APEC : cadres + jeunes diplômés / étudiants du supérieur.
+# On distingue les signaux de l'événement des signaux qui prouvent
+# qu'il concerne réellement le public Apec.
+EVENT_SIGNAL_PATTERNS = (
+    r"\bforum\b",
+    r"\bsalon\b",
+    r"\bjob[ -]?dating\b",
+    r"\brecrutement\b",
+    r"\bemploi\b",
+    r"\bformation\b",
+    r"\bcareer\b",
+    r"\bcarri[èe]re\b",
+    r"\bportes? ouvertes?\b",
+    r"\balumni\b",
+    r"\brencontre(s)?\b",
+    r"\bjourn[ée]e\b",
+)
+
+# Signaux forts de cible Apec.
+APEC_TARGET_PATTERNS = (
+    # Cadres / marché cadre
+    r"\bcadres?\b",
+    r"\bcadre(s)? dirigeant(s)?\b",
+    r"\bemploi(s)? cadres?\b",
+    r"\brecrutement(s)? cadres?\b",
+    r"\bmanagement\b",
+    r"\bmanager(s)?\b",
+    # Jeunes diplômés / niveau supérieur
+    r"\bjeunes? diplôm[ée]s?\b",
+    r"\bdiplôm[ée]s?\b",
+    r"\bbac\s*\+\s*[3-8]\b",
+    r"\bbac\+\s*[3-8]\b",
+    r"\bmaster(s)?\b",
+    r"\bdoctorat\b",
+    r"\bdoctorants?\b",
+    r"\bjeunes? talents?\b",
+    # Enseignement supérieur à potentiel Apec
+    r"\benseignement supérieur\b",
+    r"\buniversit[ée]\b",
+    r"\buniversit[ée]s\b",
+    r"\bIAE\b",
+    r"\balumni\b",
+    r"\b[ée]cole d[' ]ing[ée]nieurs?\b",
+    r"\b[ée]cole de commerce\b",
+    r"\b[ée]coles? de commerce\b",
+    r"\bgrande[s]? [ée]cole[s]?\b",
+    r"\b[ée]tudiants?\b.*\b(master|bac\s*\+|ing[ée]nieur|universit[ée]|IAE)\b",
+    # Mobilité / évolution professionnelle
+    r"\b[ée]volution professionnelle\b",
+    r"\breconversion professionnelle\b",
+    r"\btransition professionnelle\b",
+    r"\bmobilit[ée] professionnelle\b",
+    r"\bprojet professionnel\b",
+    r"\bcarri[èe]re[s]?\b",
+    # Recrutement de profils supérieurs
+    r"\bprofils? cadres?\b",
+    r"\bprofils? [ée]tudiants?\b",
+    r"\bprofils? dipl[ôo]m[ée]s?\b",
+    r"\bing[ée]nieur(s)?\b",
+    r"\bfonctions? support\b",
+    r"\bfonctions? [ée]xpertise\b",
+    r"\bressources humaines\b",
+    r"\bRH\b",
+    # Apec explicite / dispositifs très proches
+    r"\bAPEC\b",
+    r"\bapec connect\b",
+    r"\bcadre(s)? / jeunes? diplôm[ée]s?\b",
+)
+
+# Contexte supérieur suffisamment qualifié : on ne retient pas un simple
+# salon étudiant post-bac généraliste uniquement parce qu'il contient
+# "étudiant".
+SUPERIOR_CONTEXT_PATTERNS = (
+    r"\benseignement supérieur\b",
+    r"\buniversit[ée]\b",
+    r"\bIAE\b",
+    r"\bmaster(s)?\b",
+    r"\bbac\s*\+\s*[3-8]\b",
+    r"\bbac\+\s*[3-8]\b",
+    r"\b[ée]cole d[' ]ing[ée]nieurs?\b",
+    r"\b[ée]cole de commerce\b",
+    r"\bgrande[s]? [ée]cole[s]?\b",
+    r"\balumni\b",
+    r"\bdoctorat\b",
+    r"\bdoctorants?\b",
+)
+
+# Bruit éditorial / articles qui parlent d'un événement sans être
+# l'événement lui-même.
 NOISE_PATTERNS = (
     r"\bgoogle news\b",
     r"\bactualit[ée]s?\b",
@@ -272,9 +392,9 @@ NOISE_PATTERNS = (
     r"\bla famille\b",
     r"\bjeux intercommunaux\b",
     r"\bpalmar[èe]s\b",
-    r"\bretour sur\b",
     r"\brecensement\b",
     r"\bvie locale\b",
+    r"\bretour sur\b",
 )
 
 PRESS_SUFFIXES = (
@@ -285,90 +405,129 @@ PRESS_SUFFIXES = (
     " - le populaire du centre",
 )
 
-EVENT_SIGNAL_PATTERNS = (
-    r"\bforum\b",
-    r"\bsalon\b",
-    r"\bjob dating\b",
-    r"\bjob-dating\b",
-    r"\brecrutement\b",
-    r"\bemploi\b",
-    r"\bformation\b",
-    r"\bcareer\b",
-    r"\bcarri[èe]re\b",
-    r"\bportes? ouvertes?\b",
-    r"\bjourn[ée]e portes? ouvertes?\b",
-    r"\balumni\b",
-    r"\bentreprises?\b",
-    r"\b[ée]tudiants?\b",
-    r"\benseignement sup[ée]rieur\b",
-    r"\buniversit[ée]\b",
-    r"\b[ée]cole d[' ](ing[ée]nieurs?|commerce)\b",
-    r"\brencontre(s)? entreprises?\b",
-    r"\bsemaine de l'emploi\b",
-    r"\bsemaine de la formation\b",
+# Hors cible Apec, même si le contenu contient "emploi", "forum" ou
+# "recrutement". On garde volontairement les événements supérieurs et
+# cadres lorsqu'ils sont explicitement présents.
+APEC_EXCLUSION_PATTERNS = (
+    r"\bjob(s)? étudiant(s)?\b",
+    r"\bemploi(s)? étudiant(s)?\b",
+    r"\bjobs? saisonnier(s)?\b",
+    r"\bemploi(s)? saisonnier(s)?\b",
+    r"\brecrutement(s)? saisonnier(s)?\b",
+    r"\bpetits? boulots?\b",
+    r"\bjobs? d[' ]?été\b",
+    r"\bjob(s)? vacances\b",
+    r"\bint[ée]rim\b",
+    r"\bint[ée]rimaires?\b",
+    r"\brestauration\b.*\bjob[ -]?dating\b",
+    r"\bjob[ -]?dating\b.*\brestauration\b",
+    r"\bvendanges?\b",
+    r"\bplongeur(s)?\b",
+    r"\bserveur(s)?\b",
+    r"\bcaissier(s)?\b",
+    r"\bcaissi[èe]re(s)?\b",
+    r"\bmanutentionnaire(s)?\b",
+    r"\bouvrier(s)?\b",
+    r"\bagent(s)? d[' ]entretien\b",
+    r"\bemplois? sans qualification\b",
 )
 
 
-def _text_for_filter(row):
+def _text_for_filter(row, data=None):
     values = (
         row.get("titre_page"), row.get("titre"), row.get("description_page"),
         row.get("description"), row.get("categorie_ia"), row.get("categorie"),
+        row.get("organisateur_page"), row.get("lieu_page"),
     )
+    if data:
+        values += (data.get("title"), data.get("details"))
     return norm(" ".join(clean(v) for v in values if clean(v)))
 
 
+def _has_pattern(text, patterns):
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _apec_target_level(text):
+    """Retourne un niveau de pertinence Apec déterministe :
+    2 = cible Apec explicite, 1 = cible supérieure probable, 0 = hors cible.
+    """
+    if _has_pattern(text, APEC_TARGET_PATTERNS):
+        return 2
+    if _has_pattern(text, SUPERIOR_CONTEXT_PATTERNS):
+        return 1
+    return 0
+
+
 def prefilter_candidate(row):
-    """Rejette le bruit évident avant même la qualification finale."""
+    """Premier tri : bruit + événement + premier signal de cible Apec."""
     title = norm(row.get("titre_page") or row.get("titre"))
-    source = norm(row.get("url_finale") or row.get("url"))
     category = norm(row.get("categorie_ia") or row.get("categorie"))
     text = _text_for_filter(row)
 
     if not title:
         return False, "Titre absent."
 
-    if any(re.search(pattern, title) for pattern in NOISE_PATTERNS):
-        return False, "Titre identifié comme contenu éditorial / bruit."
+    if _has_pattern(title, NOISE_PATTERNS):
+        return False, "Contenu éditorial / bruit."
 
     if any(title.endswith(suffix) for suffix in PRESS_SUFFIXES):
-        return False, "Titre issu d'un article de presse, pas d'un intitulé événement."
+        return False, "Article de presse, pas un intitulé événement."
 
-    # Une catégorie non reconnue ne peut pas alimenter les feuilles événementielles.
+    if _has_pattern(text, APEC_EXCLUSION_PATTERNS) and not _has_pattern(text, APEC_TARGET_PATTERNS):
+        return False, "Événement hors cible Apec."
+
     if category and category not in ALLOWED_CATEGORIES:
-        # Certaines valeurs historiques sont déjà normalisées en texte.
-        if category not in {"emploi & formation", "alumni / réseau", "salon étudiant / orientation", "portes ouvertes"}:
+        if category not in {
+            "emploi & formation", "alumni / réseau", "salon étudiant / orientation", "portes ouvertes"
+        }:
             return False, "Catégorie hors périmètre Apec."
 
-    # Double sécurité : il faut au moins un signal explicite d'événement ciblé.
-    if not any(re.search(pattern, text) for pattern in EVENT_SIGNAL_PATTERNS):
-        return False, "Aucun signal explicite d'événement emploi/formation/enseignement supérieur."
+    if not _has_pattern(text, EVENT_SIGNAL_PATTERNS):
+        return False, "Aucun événement identifiable."
+
+    if _apec_target_level(text) == 0:
+        return False, "Aucun signal de cible cadres / jeunes diplômés / supérieur qualifié."
 
     return True, ""
 
 
 def final_event_filter(data, row):
-    """Contrôle final : une décision IA PERTINENT ne suffit pas à elle seule."""
+    """Second tri indépendant : valide la vraie pertinence Apec."""
     title = norm(data.get("title"))
-    category = norm(row.get("categorie_ia") or row.get("categorie"))
     details = norm(data.get("details"))
+    combined = _text_for_filter(row, data)
+    category = norm(row.get("categorie_ia") or row.get("categorie"))
 
     if not title:
         return False, "Titre absent."
 
-    if any(re.search(pattern, title) for pattern in NOISE_PATTERNS):
-        return False, "Titre rejeté par le contrôle final anti-bruit."
+    if _has_pattern(title, NOISE_PATTERNS):
+        return False, "Titre éditorial rejeté."
 
     if any(title.endswith(suffix) for suffix in PRESS_SUFFIXES):
-        return False, "Article de presse rejeté par le contrôle final."
+        return False, "Article de presse rejeté."
+
+    if _has_pattern(combined, APEC_EXCLUSION_PATTERNS) and not _has_pattern(combined, APEC_TARGET_PATTERNS):
+        return False, "Hors cible Apec."
 
     if category and category not in ALLOWED_CATEGORIES and category not in {
         "emploi & formation", "alumni / réseau", "salon étudiant / orientation", "portes ouvertes"
     }:
         return False, "Catégorie hors périmètre."
 
-    combined = f"{title} {details}"
-    if not any(re.search(pattern, combined) for pattern in EVENT_SIGNAL_PATTERNS):
-        return False, "Le contenu ne contient pas de signal suffisant d'événement ciblé."
+    if not _has_pattern(combined, EVENT_SIGNAL_PATTERNS):
+        return False, "Ce n'est pas un événement identifiable."
+
+    target_level = _apec_target_level(combined)
+    if target_level == 0:
+        return False, "Cible Apec absente : pas de signal cadres / jeunes diplômés / supérieur qualifié."
+
+    # Un événement supérieur généraliste doit au minimum comporter un
+    # contexte qualifié (université, master, ingénieur, alumni, etc.).
+    # Cela évite de transformer tout salon étudiant post-bac en événement Apec.
+    if target_level == 1 and not _has_pattern(combined, SUPERIOR_CONTEXT_PATTERNS):
+        return False, "Enseignement supérieur insuffisamment qualifié."
 
     return True, ""
 
@@ -805,9 +964,11 @@ def validate_workbook(wb):
     )
 
     for sheet_name in YEAR_SHEETS.values():
+        ensure_event_headers(wb[sheet_name])
         require_headers(wb[sheet_name], EVENT_HEADERS)
 
     for sheet_name in DEPT_SHEETS.values():
+        ensure_event_headers(wb[sheet_name])
         require_headers(wb[sheet_name], EVENT_HEADERS)
 
     require_headers(
