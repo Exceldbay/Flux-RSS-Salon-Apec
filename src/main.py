@@ -7,7 +7,7 @@ import time
 import re
 import subprocess
 import sys
-import json
+
 import feedparser
 import pandas as pd
 import yaml
@@ -18,36 +18,11 @@ from bs4 import BeautifulSoup
 from ia import analyser_resultat
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-ROOT = Path(__file__).resolve().parent.parent
-CONFIG = ROOT / "config"
-DATA = ROOT / "data"
-OUTPUT = ROOT / "output"
-
-MAX_WORKERS = 16
-TIMEOUT = 10
-MAX_RETRIES = 2
-MAX_IA_ANALYSES = 50
-# Délai minimal entre deux requêtes Gemini.
-IA_COOLDOWN_SECONDS = 5
-
-thread_local = threading.local()
-
-
-# ============================================================
-# CHARGEMENT CONFIGURATION
-# ============================================================
-
-def load_yaml(filename):
-    with open(CONFIG / filename, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def synchroniser_excel():
-    """Lance le synchroniseur Excel après la génération des CSV."""
+    """
+    Lance le synchroniseur Excel après la génération de resultats_ia.csv.
+    Le synchroniseur est exécuté avec le même interpréteur Python que main.py.
+    """
     script = ROOT / "src" / "synchroniser_excel.py"
 
     print()
@@ -81,6 +56,32 @@ def synchroniser_excel():
     except Exception as e:
         print(f"⚠️ Erreur lors du lancement du synchroniseur : {e}")
         return False
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = ROOT / "config"
+DATA = ROOT / "data"
+OUTPUT = ROOT / "output"
+
+MAX_WORKERS = 16
+TIMEOUT = 10
+MAX_RETRIES = 2
+MAX_IA_ANALYSES = 50
+
+thread_local = threading.local()
+
+
+# ============================================================
+# CHARGEMENT CONFIGURATION
+# ============================================================
+
+def load_yaml(filename):
+    with open(CONFIG / filename, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 # ============================================================
@@ -729,202 +730,205 @@ def dedoublonner(resultats):
 # SCORING RENFORCÉ APRÈS AUDIT
 # ============================================================
 
-def calculer_score(resultat):
+def _signaux(texte, patterns):
+    texte = normaliser(texte)
+    return [p for p in patterns if p in texte]
 
+
+# ============================================================
+# SCORING CIBLE APEC — LES OPERATEURS DE RECHERCHE RESTENT INCHANGES
+# ============================================================
+
+APEC_DIRECT = [
+    "apec", "apec connect", "cadre", "cadres", "cadre dirigeant",
+    "jeune diplômé", "jeunes diplômés", "jeune diplômée", "jeunes diplômées",
+    "diplômés", "diplômées", "recrutement de cadres", "recrutement cadre",
+    "mobilité professionnelle", "évolution professionnelle", "reconversion",
+]
+
+APEC_QUALIFIE = [
+    "bac+3", "bac+4", "bac+5", "master", "mastère", "mba", "doctorant",
+    "doctorants", "docteur", "doctorat", "ingénieur", "ingénieurs",
+    "école d'ingénieurs", "école d’ingénieurs", "école de commerce",
+    "grande école", "grandes écoles", "iae", "université", "universitaire",
+    "alumni", "anciens élèves", "jeunes talents", "talents", "graduate",
+]
+
+RELATION_ENTREPRISE = [
+    "rencontre entreprises", "rencontres entreprises", "entreprises et étudiants",
+    "entreprises / étudiants", "entreprises et diplômés", "employeurs",
+    "recruteurs", "recruteur", "job dating", "forum entreprises",
+    "forum entreprise", "forum emploi", "salon emploi", "salon de l'emploi",
+    "recrutement", "recruter", "offres d'emploi", "relations entreprises",
+    "relation entreprise", "career", "carrière",
+]
+
+SUPERIEUR_FORT = [
+    "université", "université de", "la rochelle université", "poitiers université",
+    "université de limoges", "iaE", "master", "bac+5", "école d'ingénieurs",
+    "école d’ingénieurs", "école de commerce", "grande école", "alumni",
+    "anciens élèves", "doctorat", "doctorants", "ingénieurs",
+]
+
+EXCLUSIONS_FORTES = [
+    "job étudiant", "jobs étudiants", "emploi étudiant", "emplois étudiants",
+    "job saisonnier", "jobs saisonniers", "emploi saisonnier", "emplois saisonniers",
+    "travail saisonnier", "intérim", "missions d'intérim", "petits boulots",
+    "job d'été", "jobs d'été", "vendanges", "baby-sitting", "restauration",
+    "serveur", "serveuse", "plongeur", "plongeuse", "caissier", "caissière",
+    "manutentionnaire", "préparateur de commande", "préparatrice de commande",
+    "sans diplôme", "sans qualification", "niveau cap", "niveau bep", "collège",
+    "lycée", "post-bac", "après le bac", "orientation des lycéens",
+]
+
+EXCLUSIONS_EDITORIAL = [
+    "actualités", "actualité", "portrait", "interview", "tribune", "édito",
+    "palmarès", "retour sur", "en images", "recensement", "vie locale",
+]
+
+EVENT_SIGNAL_CIBLE = EVENTS_EMPLOI + EVENTS_SUPERIEUR
+
+
+def calculer_score(resultat):
+    """Score de pertinence Apec indépendant des opérateurs de recherche.
+
+    Les opérateurs continuent à produire le même volume de recherche. Cette
+    couche décide ensuite si le résultat est réellement exploitable par Apec.
+    """
     titre = normaliser(resultat.get("titre", ""))
     description = normaliser(resultat.get("description", ""))
     source = normaliser(resultat.get("source", ""))
+    page = normaliser(
+        " ".join(str(resultat.get(k, "")) for k in (
+            "titre_page", "description_page", "lieu_page", "organisateur_page"
+        ))
+    )
+    texte = f"{titre} {description} {page}"
+    categorie = int(resultat.get("categorie_numero", 0) or 0)
+    annee = str(resultat.get("annee_recherchee", ""))
 
-    texte = f"{titre} {description}"
-    code_dept = str(resultat.get("departement", ""))
-    categorie = int(resultat.get("categorie_numero", 0))
-    annee_recherchee = str(resultat.get("annee_recherchee", ""))
+    direct = _signaux(texte, APEC_DIRECT)
+    qualifie = _signaux(texte, APEC_QUALIFIE)
+    entreprise = _signaux(texte, RELATION_ENTREPRISE)
+    superieur = _signaux(texte, SUPERIEUR_FORT)
+    exclusions = _signaux(texte, EXCLUSIONS_FORTES)
+    editorial = _signaux(texte, EXCLUSIONS_EDITORIAL)
+    event_emploi = _signaux(texte, EVENTS_EMPLOI)
+    event_superieur = _signaux(texte, EVENTS_SUPERIEUR)
+
+    geo_ok, dept_present, villes_presentes, hors_geo = detecter_geographie(resultat)
+    annees = extraire_annees(texte)
 
     score = 0
     raisons = []
 
-    events_emploi = contient_terme(texte, EVENTS_EMPLOI)
-    events_superieur = contient_terme(texte, EVENTS_SUPERIEUR)
-
-    termes_emploi = contient_terme(texte, TERMES_EMPLOI)
-    termes_formation = contient_terme(texte, TERMES_FORMATION)
-    termes_superieur = contient_terme(texte, TERMES_SUPERIEUR)
-    termes_apec = contient_terme(texte, TERMES_APEC)
-
-    bruit = contient_terme(texte, BRUIT_FORT)
-    hors_perimetre = contient_terme(texte, EVENEMENTS_HORS_PERIMETRE)
-
-    geo_ok, dept_present, villes_presentes, hors_geo = detecter_geographie(resultat)
-
-    annees = extraire_annees(texte)
-
-    # --------------------------------------------------------
-    # 1. NATURE D'ÉVÉNEMENT
-    # --------------------------------------------------------
-
-    event_emploi = bool(events_emploi)
-    event_superieur = bool(events_superieur)
-
-    if event_emploi or event_superieur:
-        score += 10
-        raisons.append(
-            "Événement identifié : "
-            + ", ".join((events_emploi + events_superieur)[:4])
-        )
+    # Nature événementielle : nécessaire mais volontairement peu pondérée.
+    evenement = bool(event_emploi or event_superieur)
+    if evenement:
+        score += 6
+        raisons.append("format événementiel identifié")
     else:
-        score -= 8
-        raisons.append("Pas de format événementiel explicite")
+        score -= 12
+        raisons.append("événement non clairement identifiable")
 
-    # --------------------------------------------------------
-    # 2. ALIGNEMENT CATÉGORIE
-    # --------------------------------------------------------
+    # Cible directe Apec.
+    if direct:
+        score += min(24, 8 * len(direct))
+        raisons.append("cible Apec directe: " + ", ".join(direct[:4]))
 
-    if categorie == 2:
-        if event_emploi:
-            score += 4
-            raisons.append("Événement emploi/recrutement/formation")
-        if termes_emploi:
-            score += 6
-            raisons.append(
-                "Emploi : " + ", ".join(termes_emploi[:4])
-            )
-        if termes_formation:
-            score += 3
-            raisons.append(
-                "Formation : " + ", ".join(termes_formation[:3])
-            )
+    # Jeunes diplômés / enseignement supérieur qualifié.
+    if qualifie:
+        score += min(18, 4 * len(qualifie))
+        raisons.append("profil qualifié/supérieur: " + ", ".join(qualifie[:5]))
 
-    elif categorie == 1:
-        if event_superieur:
-            score += 4
-            raisons.append("Événement enseignement supérieur")
-        if termes_superieur:
-            score += 5
-            raisons.append(
-                "Supérieur : " + ", ".join(termes_superieur[:4])
-            )
-        if termes_formation:
-            score += 3
-            raisons.append(
-                "Orientation/formation : "
-                + ", ".join(termes_formation[:3])
-            )
+    if superieur:
+        score += min(12, 4 * len(superieur))
+        raisons.append("enseignement supérieur: " + ", ".join(superieur[:4]))
 
-    # --------------------------------------------------------
-    # 3. GÉOGRAPHIE — OBLIGATOIRE POUR UN PERTINENT
-    # --------------------------------------------------------
+    # Relation employeurs / recrutement.
+    if entreprise:
+        score += min(16, 4 * len(entreprise))
+        raisons.append("relation entreprises/recrutement: " + ", ".join(entreprise[:5]))
 
+    # Bonus spécifique aux sources institutionnelles/partenaires utiles.
+    source_bonus_terms = [
+        "apec", "université", "iut", "cesi", "nqt", "france travail",
+        "transitions pro", "grandangoulême", "limoges métropole",
+    ]
+    source_bonus = [x for x in source_bonus_terms if x in source]
+    if source_bonus:
+        score += min(10, 5 * len(source_bonus))
+        raisons.append("source qualifiante: " + ", ".join(source_bonus[:3]))
+
+    # Catégorie issue des opérateurs : bonus faible, jamais décisionnaire.
+    if categorie == 1 and superieur:
+        score += 4
+    if categorie == 2 and (event_emploi or entreprise):
+        score += 3
+
+    # Géographie.
     if geo_ok:
         score += 5
-        if villes_presentes:
-            raisons.append(
-                "Ville cible : " + ", ".join(villes_presentes[:3])
-            )
-        elif dept_present:
-            raisons.append("Département cible")
+        raisons.append("géographie cible vérifiée")
     else:
-        score -= 6
-        raisons.append("Localisation cible non démontrée")
-
-    if hors_geo:
-        score -= 14
-        raisons.append(
-            "Hors périmètre détecté : "
-            + ", ".join(hors_geo[:3])
-        )
-
-    # --------------------------------------------------------
-    # 4. HORS PÉRIMÈTRE THÉMATIQUE
-    # --------------------------------------------------------
-
-    if hors_perimetre:
-        score -= 18
-        raisons.append(
-            "Événement hors périmètre : "
-            + ", ".join(hors_perimetre[:3])
-        )
-
-    # --------------------------------------------------------
-    # 5. BRUIT JOURNALISTIQUE
-    # --------------------------------------------------------
-
-    if bruit:
         score -= 10
-        raisons.append(
-            "Bruit / actualité générale : "
-            + ", ".join(bruit[:4])
-        )
+        raisons.append("géographie cible non démontrée")
+    if hors_geo:
+        score -= 20
+        raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
 
-    # Une mention Apec seule ne doit plus transformer
-    # une actualité générale en événement pertinent.
-    if termes_apec and not (event_emploi or event_superieur):
-        score -= 6
-        raisons.append("Mention Apec sans événement identifié")
+    # Exclusions : une exclusion ne tue pas un événement si un signal Apec
+    # très fort est présent, mais elle doit faire fortement baisser le score.
+    if exclusions:
+        malus = min(30, 10 * len(exclusions))
+        score -= malus
+        raisons.append("hors cible probable: " + ", ".join(exclusions[:5]))
 
-    # --------------------------------------------------------
-    # 6. COHÉRENCE ANNÉE
-    # --------------------------------------------------------
+    if editorial and not (direct or entreprise or superieur):
+        score -= 20
+        raisons.append("contenu éditorial/actualité")
 
-    if annee_recherchee in annees:
+    # Cohérence année.
+    if annee and annee in annees:
         score += 3
-        raisons.append(
-            f"Année {annee_recherchee} explicitement détectée"
-        )
+        raisons.append(f"année {annee} détectée")
     elif annees:
-        score -= 6
-        raisons.append(
-            "Année différente détectée : "
-            + ", ".join(annees)
-        )
+        score -= 5
+        raisons.append("année différente détectée")
 
-    if annee_recherchee in normaliser(
-        resultat.get("date_publication", "")
-    ):
-        score += 1
-
-    # --------------------------------------------------------
-    # 7. DÉCISION
-    # --------------------------------------------------------
-
-    # Un résultat ne peut être "Pertinent" que s'il présente
-    # simultanément un événement + une géographie cible.
-    evenement = event_emploi or event_superieur
-
-    if (
-        evenement
-        and geo_ok
-        and not hors_geo
-        and not hors_perimetre
-        and score >= 15
-    ):
+    # Seuils : on garde un sas À vérifier pour ne pas perdre les faux négatifs.
+    if not evenement or not geo_ok or hors_geo:
+        statut = "Non pertinent" if score < 18 else "À vérifier"
+    elif score >= 24:
         statut = "Pertinent"
-        raison = "Événement local clairement identifié"
-
-    elif (
-        evenement
-        and not hors_perimetre
-        and score >= 8
-    ):
+    elif score >= 13:
         statut = "À vérifier"
-        raison = "Événement potentiel, validation nécessaire"
-
     else:
         statut = "Non pertinent"
-        raison = "Signal insuffisant ou hors périmètre"
+
+    raison = {
+        "Pertinent": "Cible Apec clairement démontrée",
+        "À vérifier": "Signal Apec réel mais preuve ou ciblage à confirmer",
+        "Non pertinent": "Cible Apec insuffisante ou événement hors périmètre",
+    }[statut]
 
     details = " | ".join(raisons)
-
     return {
         "score": score,
-        "score_emploi": 6 if termes_emploi else 0,
-        "score_formation": 3 if termes_formation else 0,
-        "score_superieur": 5 if termes_superieur else 0,
-        "score_apec": 1 if termes_apec else 0,
-        "score_geographie": 5 if geo_ok else -6,
-        "score_date": 3 if annee_recherchee in annees else 0,
-        "score_bruit": -10 if bruit else 0,
-        "score_complementaire": 4 if (event_emploi or event_superieur) else 0,
-        "bonus_titre": 2 if (events_emploi or events_superieur) else 0,
+        "score_cible_apec": score,
+        "score_emploi": 6 if event_emploi else 0,
+        "score_formation": 3 if _signaux(texte, TERMES_FORMATION) else 0,
+        "score_superieur": min(12, 4 * len(superieur)),
+        "score_apec": min(24, 8 * len(direct)),
+        "score_entreprise": min(16, 4 * len(entreprise)),
+        "score_qualifie": min(18, 4 * len(qualifie)),
+        "score_geographie": 5 if geo_ok else -10,
+        "score_date": 3 if annee and annee in annees else 0,
+        "score_bruit": -20 if editorial else 0,
+        "signaux_cible_apec": ", ".join(direct),
+        "signaux_superieur": ", ".join(superieur + qualifie[:5]),
+        "signaux_entreprise": ", ".join(entreprise),
+        "signaux_exclusion": ", ".join(exclusions),
         "statut": statut,
         "raison": raison,
         "motif": "",
@@ -932,14 +936,10 @@ def calculer_score(resultat):
         "evenement_detecte": "OUI" if evenement else "NON",
         "geographie_verifiee": "OUI" if geo_ok else "NON",
         "annee_detectee": ", ".join(annees),
-        "hors_perimetre": ", ".join(hors_perimetre),
+        "hors_perimetre": ", ".join(exclusions),
         "hors_geographie": ", ".join(hors_geo),
     }
 
-
-# ============================================================
-# TRAITEMENT
-# ============================================================
 
 def traiter(resultats):
     resultats = dedoublonner(resultats)
@@ -1097,18 +1097,6 @@ def appliquer_ia(pertinents, a_verifier):
             continue
 
         # ----------------------------------------------------
-        # Cooldown entre les requêtes Gemini
-        # ----------------------------------------------------
-        # Aucun délai avant le premier appel.
-        # À partir du deuxième appel, on impose 5 secondes minimum
-        # entre deux requêtes afin de réduire les risques de 429.
-        if analyses > 0:
-            print(
-                f"⏳ Cooldown Gemini : {IA_COOLDOWN_SECONDS} secondes..."
-            )
-            time.sleep(IA_COOLDOWN_SECONDS)
-
-        # ----------------------------------------------------
         # Appel Gemini
         # ----------------------------------------------------
         analyse = analyser_resultat(resultat)
@@ -1249,6 +1237,13 @@ def sauvegarder(
         "score_formation",
         "score_superieur",
         "score_apec",
+        "score_cible_apec",
+        "score_entreprise",
+        "score_qualifie",
+        "signaux_cible_apec",
+        "signaux_superieur",
+        "signaux_entreprise",
+        "signaux_exclusion",
         "score_geographie",
         "score_date",
         "score_bruit",
@@ -1375,86 +1370,6 @@ def sauvegarder(
 
 
 # ============================================================
-# NOTIFICATION TEAMS / POWER AUTOMATE
-# ============================================================
-
-GITHUB_REPO_URL = "https://github.com/Exceldbay/Flux-RSS-Salon-Apec"
-GITHUB_BRANCH = "main"
-
-
-def generer_notification_teams(
-    resultats_bruts,
-    pertinents,
-    a_verifier,
-    non_pertinents,
-    ia_resultats,
-    erreurs,
-    sauvegarde_ok,
-    synchronisation_ok,
-    duree_total,
-):
-    """
-    Génère un JSON simple à lire depuis Power Automate.
-    Les URLs pointent directement vers les fichiers du dépôt GitHub.
-    """
-    notification = {
-        "date_execution": datetime.now().isoformat(),
-        "statut": "SUCCES" if sauvegarde_ok and synchronisation_ok else "ATTENTION",
-        "resultats_rss": len(resultats_bruts),
-        "evenements_pertinents": len(pertinents),
-        "a_verifier": len(a_verifier),
-        "non_pertinents": len(non_pertinents),
-        "analyses_ia": sum(
-            1 for x in ia_resultats
-            if x.get("decision_ia") not in ("IA_NON_ANALYSE", "")
-        ),
-        "erreurs": len(erreurs) if isinstance(erreurs, (list, tuple, dict, set)) else erreurs,
-        "sauvegarde_git": bool(sauvegarde_ok),
-        "excel_synchronise": bool(synchronisation_ok),
-        "duree_secondes": round(duree_total, 1),
-
-        "excel_url": (
-            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
-            "data/Apec_Salons_Evenements.xlsx"
-        ),
-        "resultats_ia_url": (
-            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
-            "data/resultats_ia.csv"
-        ),
-        "resultats_rss_url": (
-            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
-            "data/resultats_rss.csv"
-        ),
-        "a_verifier_url": (
-            f"{GITHUB_REPO_URL}/blob/{GITHUB_BRANCH}/"
-            "data/a_verifier.csv"
-        ),
-        "workflow_url": (
-            f"{GITHUB_REPO_URL}/actions"
-        ),
-    }
-
-    chemin = DATA / "notification_teams.json"
-    chemin.write_text(
-        json.dumps(notification, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    print()
-    print("========================================")
-    print("NOTIFICATION POWER AUTOMATE / TEAMS")
-    print("========================================")
-    print(f"Fichier généré : {chemin}")
-    print(f"Statut : {notification['statut']}")
-    print(f"Excel synchronisé : {notification['excel_synchronise']}")
-    print(f"Événements pertinents : {notification['evenements_pertinents']}")
-    print(f"À vérifier : {notification['a_verifier']}")
-    print(f"URL Excel : {notification['excel_url']}")
-
-    return True
-
-
-# ============================================================
 # MAIN
 # ============================================================
 
@@ -1545,6 +1460,7 @@ def main():
     )
 
     synchronisation_ok = False
+
     if sauvegarde_ok:
         synchronisation_ok = synchroniser_excel()
 
@@ -1563,26 +1479,6 @@ def main():
     print(
         "Synchronisation Excel : "
         f"{'OUI' if synchronisation_ok else 'NON'}"
-    )
-
-    # Génère le fichier de synthèse consommable par Power Automate.
-    # Il est créé après la synchronisation afin que son statut reflète
-    # réellement l'exécution complète.
-    notification_ok = generer_notification_teams(
-        resultats_bruts=resultats_bruts,
-        pertinents=pertinents,
-        a_verifier=a_verifier,
-        non_pertinents=non_pertinents,
-        ia_resultats=ia_resultats,
-        erreurs=erreurs,
-        sauvegarde_ok=sauvegarde_ok,
-        synchronisation_ok=synchronisation_ok,
-        duree_total=duree_total,
-    )
-
-    print(
-        "Notification Teams préparée : "
-        f"{'OUI' if notification_ok else 'NON'}"
     )
 
     print()
