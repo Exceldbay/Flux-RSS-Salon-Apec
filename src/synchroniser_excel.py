@@ -6,6 +6,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 
 # ============================================================
@@ -1110,7 +1111,7 @@ def _uniformize_simple_sheet(ws, template_ws):
 
     if max_col <= 5:
         ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:{openpyxl.utils.get_column_letter(max_col)}{max(ws.max_row, 1)}"
+        ws.auto_filter.ref = f"A1:{get_column_letter(max_col)}{max(ws.max_row, 1)}"
 
     for row in range(2, ws.max_row + 1):
         for col in range(1, max_col + 1):
@@ -1123,8 +1124,6 @@ def _uniformize_simple_sheet(ws, template_ws):
 
 def uniformize_workbook(wb):
     """Applique la charte visuelle du classeur original à chaque exécution."""
-    import openpyxl.utils
-
     template_event = wb["Événements 2026"]
     template_chrono = wb[CHRONOLOGY_SHEET]
 
