@@ -245,6 +245,134 @@ def choose_decision(row):
     return "A_VERIFIER"
 
 
+# ============================================================
+# DOUBLE FILTRE DE PERTINENCE
+# 1) filtre anti-bruit avant insertion
+# 2) contrôle final après qualification IA
+# ============================================================
+
+ALLOWED_CATEGORIES = {
+    "emploi",
+    "recrutement",
+    "formation",
+    "enseignement_superieur",
+    "alumni",
+    "portes_ouvertes",
+}
+
+NOISE_PATTERNS = (
+    r"\bgoogle news\b",
+    r"\bactualit[ée]s?\b",
+    r"\ben images\b",
+    r"\bportrait\b",
+    r"\binterview\b",
+    r"\btribune\b",
+    r"\b[ée]dito\b",
+    r"\bchevilles? ouvri[èe]res?\b",
+    r"\bla famille\b",
+    r"\bjeux intercommunaux\b",
+    r"\bpalmar[èe]s\b",
+    r"\bretour sur\b",
+    r"\brecensement\b",
+    r"\bvie locale\b",
+)
+
+PRESS_SUFFIXES = (
+    " - charente libre",
+    " - centre presse",
+    " - la nouvelle république",
+    " - sud ouest",
+    " - le populaire du centre",
+)
+
+EVENT_SIGNAL_PATTERNS = (
+    r"\bforum\b",
+    r"\bsalon\b",
+    r"\bjob dating\b",
+    r"\bjob-dating\b",
+    r"\brecrutement\b",
+    r"\bemploi\b",
+    r"\bformation\b",
+    r"\bcareer\b",
+    r"\bcarri[èe]re\b",
+    r"\bportes? ouvertes?\b",
+    r"\bjourn[ée]e portes? ouvertes?\b",
+    r"\balumni\b",
+    r"\bentreprises?\b",
+    r"\b[ée]tudiants?\b",
+    r"\benseignement sup[ée]rieur\b",
+    r"\buniversit[ée]\b",
+    r"\b[ée]cole d[' ](ing[ée]nieurs?|commerce)\b",
+    r"\brencontre(s)? entreprises?\b",
+    r"\bsemaine de l'emploi\b",
+    r"\bsemaine de la formation\b",
+)
+
+
+def _text_for_filter(row):
+    values = (
+        row.get("titre_page"), row.get("titre"), row.get("description_page"),
+        row.get("description"), row.get("categorie_ia"), row.get("categorie"),
+    )
+    return norm(" ".join(clean(v) for v in values if clean(v)))
+
+
+def prefilter_candidate(row):
+    """Rejette le bruit évident avant même la qualification finale."""
+    title = norm(row.get("titre_page") or row.get("titre"))
+    source = norm(row.get("url_finale") or row.get("url"))
+    category = norm(row.get("categorie_ia") or row.get("categorie"))
+    text = _text_for_filter(row)
+
+    if not title:
+        return False, "Titre absent."
+
+    if any(re.search(pattern, title) for pattern in NOISE_PATTERNS):
+        return False, "Titre identifié comme contenu éditorial / bruit."
+
+    if any(title.endswith(suffix) for suffix in PRESS_SUFFIXES):
+        return False, "Titre issu d'un article de presse, pas d'un intitulé événement."
+
+    # Une catégorie non reconnue ne peut pas alimenter les feuilles événementielles.
+    if category and category not in ALLOWED_CATEGORIES:
+        # Certaines valeurs historiques sont déjà normalisées en texte.
+        if category not in {"emploi & formation", "alumni / réseau", "salon étudiant / orientation", "portes ouvertes"}:
+            return False, "Catégorie hors périmètre Apec."
+
+    # Double sécurité : il faut au moins un signal explicite d'événement ciblé.
+    if not any(re.search(pattern, text) for pattern in EVENT_SIGNAL_PATTERNS):
+        return False, "Aucun signal explicite d'événement emploi/formation/enseignement supérieur."
+
+    return True, ""
+
+
+def final_event_filter(data, row):
+    """Contrôle final : une décision IA PERTINENT ne suffit pas à elle seule."""
+    title = norm(data.get("title"))
+    category = norm(row.get("categorie_ia") or row.get("categorie"))
+    details = norm(data.get("details"))
+
+    if not title:
+        return False, "Titre absent."
+
+    if any(re.search(pattern, title) for pattern in NOISE_PATTERNS):
+        return False, "Titre rejeté par le contrôle final anti-bruit."
+
+    if any(title.endswith(suffix) for suffix in PRESS_SUFFIXES):
+        return False, "Article de presse rejeté par le contrôle final."
+
+    if category and category not in ALLOWED_CATEGORIES and category not in {
+        "emploi & formation", "alumni / réseau", "salon étudiant / orientation", "portes ouvertes"
+    }:
+        return False, "Catégorie hors périmètre."
+
+    combined = f"{title} {details}"
+    if not any(re.search(pattern, combined) for pattern in EVENT_SIGNAL_PATTERNS):
+        return False, "Le contenu ne contient pas de signal suffisant d'événement ciblé."
+
+    return True, ""
+
+
 def choose_title(row):
     return (
         clean(row.get("titre_page"))
@@ -719,9 +847,11 @@ def _set_column_widths(ws, widths):
 def _uniformize_event_sheet(ws, template_ws):
     # Le classeur original sert de modèle : mêmes largeurs, en-têtes,
     # filtres et comportement de lecture sur toutes les feuilles événement.
+    # Base sur le tableur original, puis élargissement contrôlé pour éviter
+    # les intitulés tronqués et les colonnes trop serrées.
     widths = {
-        key: template_ws.column_dimensions[key].width
-        for key in "ABCDEFGHIJKLM"
+        "A": 7, "B": 10, "C": 28, "D": 65, "E": 15, "F": 22,
+        "G": 38, "H": 35, "I": 80, "J": 22, "K": 25, "L": 16, "M": 65,
     }
     _set_column_widths(ws, widths)
 
@@ -756,11 +886,28 @@ def _uniformize_event_sheet(ws, template_ws):
         # Source : style spécifique des liens du classeur original.
         _copy_style_from(template_ws, text_style_row, 13, ws.cell(row, 13))
 
+        # Format de date standardisé dans tout le classeur.
+        for col in (5, 6, 11):
+            cell = ws.cell(row, col)
+            if cell.value not in (None, ""):
+                cell.number_format = "dd/mm/yyyy"
+
+        # Lecture homogène des cellules longues.
+        for col in range(1, 14):
+            cell = ws.cell(row, col)
+            alignment = copy(cell.alignment)
+            alignment.wrap_text = True
+            alignment.vertical = "top"
+            cell.alignment = alignment
+
         ws.row_dimensions[row].height = None
 
 
 def _uniformize_chronology(ws, template_ws):
-    widths = {key: template_ws.column_dimensions[key].width for key in "ABCDEFGH"}
+    widths = {
+        "A": 15, "B": 22, "C": 10, "D": 28,
+        "E": 65, "F": 35, "G": 42, "H": 65,
+    }
     _set_column_widths(ws, widths)
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:H{max(ws.max_row, 1)}"
@@ -780,6 +927,15 @@ def _uniformize_chronology(ws, template_ws):
         for col in (4, 5, 6, 7):
             _copy_style_from(template_ws, 2, 4, ws.cell(row, col))
         _copy_style_from(template_ws, 2, 8, ws.cell(row, 8))
+        for col in (1, 2):
+            if ws.cell(row, col).value not in (None, ""):
+                ws.cell(row, col).number_format = "dd/mm/yyyy"
+        for col in range(1, 9):
+            cell = ws.cell(row, col)
+            alignment = copy(cell.alignment)
+            alignment.wrap_text = True
+            alignment.vertical = "top"
+            cell.alignment = alignment
         ws.row_dimensions[row].height = None
 
 
@@ -885,10 +1041,25 @@ def main():
     }
 
     for raw in rows:
+        # TRI 1 : filtre déterministe anti-bruit avant tout ajout au classeur.
+        pre_ok, pre_reason = prefilter_candidate(raw)
+        if not pre_ok:
+            stats["ignores"] += 1
+            continue
+
         data = build_event(raw)
         decision = data["decision"]
 
         if decision == "NON_PERTINENT":
+            stats["ignores"] += 1
+            continue
+
+        if decision == "PERTINENT":
+            # TRI 2 : contrôle final indépendant de la décision IA.
+            final_ok, final_reason = final_event_filter(data, raw)
+            if not final_ok:
+                stats["ignores"] += 1
+                continue
             added = append_audit_row(
                 wb[NON_PERTINENT_SHEET],
                 data["title"],
