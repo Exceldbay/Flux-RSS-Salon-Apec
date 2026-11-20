@@ -24,6 +24,11 @@ def analyser_resultat(resultat):
 
         titre = resultat.get("titre", "")
         description = resultat.get("description", "")
+        titre_page = resultat.get("titre_page", "")
+        description_page = resultat.get("description_page", "")
+        date_evenement_page = resultat.get("date_evenement_page", "")
+        lieu_page = resultat.get("lieu_page", "")
+        organisateur_page = resultat.get("organisateur_page", "")
         source = resultat.get("source", "")
         url = resultat.get("url", "")
         date = resultat.get("date_publication", "")
@@ -75,11 +80,18 @@ RÈGLES DE TRI :
    pré-Bac+3, jobs étudiants, jobs saisonniers, petits boulots, recrutement
    sans qualification, intérim générique ou métiers très éloignés de la cible
    Apec sont NON_PERTINENTS, sauf preuve claire d'un public cadre / diplômé.
-9. Ne jamais inventer une date, un lieu, un public ou un niveau de diplôme.
-10. Un article d'actualité qui parle d'un événement sans permettre d'identifier
+   En revanche, un job dating ou forum de recrutement ne doit PAS être rejeté
+   simplement parce que le mot « cadre » ou le niveau de diplôme n'apparaît pas :
+   si la page montre des employeurs/recruteurs + université/enseignement
+   supérieur/école/masters/ingénieurs/diplômés, il faut au minimum A_VERIFIER.
+9. En cas de public potentiellement qualifié mais de preuve incomplète, choisir
+   A_VERIFIER plutôt que NON_PERTINENT. NON_PERTINENT est réservé aux cas où
+   l'absence de pertinence Apec est suffisamment démontrée.
+10. Ne jamais inventer une date, un lieu, un public ou un niveau de diplôme.
+11. Un article d'actualité qui parle d'un événement sans permettre d'identifier
     réellement l'événement ne doit pas être retenu comme PERTINENT.
-11. Les CCI sont exclues comme événement selon les règles du projet.
-12. En cas de doute réel, utiliser A_VERIFIER plutôt que forcer PERTINENT.
+12. Les CCI sont exclues comme événement selon les règles du projet.
+13. En cas de doute réel, utiliser A_VERIFIER plutôt que forcer PERTINENT.
 
 SIGNALS PYTHON DÉJÀ CALCULÉS :
 - score Apec : {score_apec}
@@ -89,8 +101,13 @@ SIGNALS PYTHON DÉJÀ CALCULÉS :
 - exclusions détectées : {signaux_exclusion}
 
 DONNÉES RSS :
-Titre : {titre}
-Description : {description}
+Titre RSS : {titre}
+Description RSS : {description}
+Titre de la page : {titre_page}
+Description de la page : {description_page}
+Date de l'événement sur la page : {date_evenement_page}
+Lieu détecté sur la page : {lieu_page}
+Organisateur détecté sur la page : {organisateur_page}
 Source : {source}
 Date publication : {date}
 Année recherchée : {annee_recherchee}
