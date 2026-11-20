@@ -46,6 +46,7 @@ EVENT_HEADERS = {
     "Date fin (ou 2e date distincte)",
     "Lieu",
     "Détails et récurrence",
+    "Statut au 12/11/2026",
     "Prochaine édition connue",
     "Apec présent",
     "Source (lien)",
@@ -167,24 +168,12 @@ def require_sheet(wb, sheet_name):
     return wb[sheet_name]
 
 
-def require_headers(ws, required_headers, check_status=False):
+def require_headers(ws, required_headers):
     headers = get_headers(ws)
     missing = [
         header for header in required_headers
         if header not in headers
     ]
-
-    # Le libellé de la colonne de statut contient une date qui évolue
-    # avec les versions du classeur. On accepte donc n'importe quelle
-    # colonne de la forme "Statut au JJ/MM/AAAA".
-    if check_status:
-        status_headers = [
-            header for header in headers
-            if norm(header).startswith("statut au ")
-        ]
-        if not status_headers:
-            missing.append("une colonne 'Statut au JJ/MM/AAAA'")
-
     if missing:
         raise ValueError(
             f"Colonnes manquantes dans '{ws.title}' : "
@@ -256,40 +245,11 @@ def choose_decision(row):
     return "A_VERIFIER"
 
 
-def is_generic_title(value):
-    """Retourne True si le titre est un titre générique de moteur/source."""
-    value = clean(value)
-    if not value:
-        return False
-
-    normalized = norm(value)
-    generic_exact = {
-        "google news",
-        "google actualites",
-        "google actualites france",
-    }
-
-    if normalized in generic_exact:
-        return True
-
-    # Cas fréquents : "Google News - ..." / "Google Actualités - ..."
-    return normalized.startswith("google news -") or normalized.startswith("google actualites -")
-
-
 def choose_title(row):
-    """Choisit le vrai titre d'événement, en écartant les titres génériques."""
-    titre_page = clean(row.get("titre_page"))
-    titre_rss = clean(row.get("titre"))
-
-    if titre_page and not is_generic_title(titre_page):
-        return titre_page
-
-    if titre_rss and not is_generic_title(titre_rss):
-        return titre_rss
-
-    # Aucun titre exploitable : le synchroniseur le classera
-    # en "Non vérifiable" au lieu de l'injecter dans les feuilles d'événements.
-    return ""
+    return (
+        clean(row.get("titre_page"))
+        or clean(row.get("titre"))
+    )
 
 
 def choose_source(row):
@@ -520,18 +480,12 @@ def write_event_row(ws, row_number, data, update_existing=False):
 
     # Pour une ligne existante, on ne remplace pas les champs
     # éditoriaux manuels si la nouvelle information est vide.
-    status_header = next(
-        (name for name in headers if norm(name).startswith("statut au ")),
-        None,
-    )
-
     optional_values = {
         "Lieu": data["location"],
         "Détails et récurrence": data["details"],
+        "Statut au 12/11/2026": data["status"],
         "Apec présent": data["apec"],
     }
-    if status_header:
-        optional_values[status_header] = data["status"]
 
     for name, value in values.items():
         col = headers.get(name)
@@ -720,22 +674,13 @@ def validate_workbook(wb):
     require_headers(
         wb[CHRONOLOGY_SHEET],
         CHRONO_HEADERS,
-        check_status=False,
     )
 
     for sheet_name in YEAR_SHEETS.values():
-        require_headers(
-            wb[sheet_name],
-            EVENT_HEADERS,
-            check_status=True,
-        )
+        require_headers(wb[sheet_name], EVENT_HEADERS)
 
     for sheet_name in DEPT_SHEETS.values():
-        require_headers(
-            wb[sheet_name],
-            EVENT_HEADERS,
-            check_status=True,
-        )
+        require_headers(wb[sheet_name], EVENT_HEADERS)
 
     require_headers(
         wb[NON_PERTINENT_SHEET],
@@ -746,6 +691,149 @@ def validate_workbook(wb):
         wb[NON_VERIFIABLE_SHEET],
         {"Élément", "Raison"},
     )
+
+
+# ============================================================
+# UNIFORMISATION DE LA MISE EN FORME
+# Basée sur la charte du classeur original
+# ============================================================
+
+EVENT_SHEET_NAMES = [*YEAR_SHEETS.values(), *DEPT_SHEETS.values(), "En ligne"]
+
+
+def _copy_style_from(ws, source_row, source_col, target_cell):
+    source = ws.cell(source_row, source_col)
+    if source.has_style:
+        target_cell._style = copy(source._style)
+    if source.number_format:
+        target_cell.number_format = source.number_format
+    target_cell.alignment = copy(source.alignment)
+    target_cell.protection = copy(source.protection)
+
+
+def _set_column_widths(ws, widths):
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+
+def _uniformize_event_sheet(ws, template_ws):
+    # Le classeur original sert de modèle : mêmes largeurs, en-têtes,
+    # filtres et comportement de lecture sur toutes les feuilles événement.
+    widths = {
+        key: template_ws.column_dimensions[key].width
+        for key in "ABCDEFGHIJKLM"
+    }
+    _set_column_widths(ws, widths)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:M{max(ws.max_row, 1)}"
+
+    # En-tête : copie exacte du style original.
+    for col in range(1, 14):
+        _copy_style_from(template_ws, 1, col, ws.cell(1, col))
+    ws.row_dimensions[1].height = template_ws.row_dimensions[1].height
+
+    # Style de référence des colonnes texte/source du classeur original.
+    text_style_row = 2
+    for row in range(2, ws.max_row + 1):
+        # N° et département
+        _copy_style_from(template_ws, text_style_row, 1, ws.cell(row, 1))
+        _copy_style_from(template_ws, text_style_row, 2, ws.cell(row, 2))
+
+        # Colonnes texte
+        for col in (3, 4, 7, 8, 9, 10, 12):
+            _copy_style_from(template_ws, text_style_row, 3, ws.cell(row, col))
+
+        # Dates : une date complète reprend le format date du modèle ;
+        # une cellule vide garde le style neutre du modèle.
+        for col in (5, 6, 11):
+            cell = ws.cell(row, col)
+            if cell.value is None or cell.value == "":
+                _copy_style_from(template_ws, 4, 6, cell)
+            else:
+                _copy_style_from(template_ws, 4, 5, cell)
+
+        # Source : style spécifique des liens du classeur original.
+        _copy_style_from(template_ws, text_style_row, 13, ws.cell(row, 13))
+
+        ws.row_dimensions[row].height = None
+
+
+def _uniformize_chronology(ws, template_ws):
+    widths = {key: template_ws.column_dimensions[key].width for key in "ABCDEFGH"}
+    _set_column_widths(ws, widths)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:H{max(ws.max_row, 1)}"
+
+    for col in range(1, 9):
+        _copy_style_from(template_ws, 1, col, ws.cell(1, col))
+    ws.row_dimensions[1].height = template_ws.row_dimensions[1].height
+
+    for row in range(2, ws.max_row + 1):
+        for col in (1, 2):
+            cell = ws.cell(row, col)
+            if cell.value is None or cell.value == "":
+                _copy_style_from(template_ws, 3, col, cell)
+            else:
+                _copy_style_from(template_ws, 2, 1, cell)
+        _copy_style_from(template_ws, 2, 3, ws.cell(row, 3))
+        for col in (4, 5, 6, 7):
+            _copy_style_from(template_ws, 2, 4, ws.cell(row, col))
+        _copy_style_from(template_ws, 2, 8, ws.cell(row, 8))
+        ws.row_dimensions[row].height = None
+
+
+def _uniformize_simple_sheet(ws, template_ws):
+    # Pour les feuilles à 2/5 colonnes, on harmonise la structure sans
+    # écraser les éventuels surlignages métier déjà présents dans l'original.
+    max_col = ws.max_column
+    for col in range(1, max_col + 1):
+        _copy_style_from(template_ws, 1, min(col, template_ws.max_column), ws.cell(1, col))
+    ws.row_dimensions[1].height = template_ws.row_dimensions[1].height
+
+    if max_col <= 5:
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A1:{openpyxl.utils.get_column_letter(max_col)}{max(ws.max_row, 1)}"
+
+    for row in range(2, ws.max_row + 1):
+        for col in range(1, max_col + 1):
+            # Style texte standard du modèle, sauf si la cellule originale
+            # possède déjà un style métier distinct : celui-ci est conservé.
+            if ws.cell(row, col).style_id == 0:
+                _copy_style_from(template_ws, 2, min(col, template_ws.max_column), ws.cell(row, col))
+        ws.row_dimensions[row].height = None
+
+
+def uniformize_workbook(wb):
+    """Applique la charte visuelle du classeur original à chaque exécution."""
+    import openpyxl.utils
+
+    template_event = wb["Événements 2026"]
+    template_chrono = wb[CHRONOLOGY_SHEET]
+
+    for sheet_name in EVENT_SHEET_NAMES:
+        if sheet_name in wb.sheetnames:
+            _uniformize_event_sheet(wb[sheet_name], template_event)
+
+    if CHRONOLOGY_SHEET in wb.sheetnames:
+        _uniformize_chronology(wb[CHRONOLOGY_SHEET], template_chrono)
+
+    if "Contacts" in wb.sheetnames:
+        _uniformize_simple_sheet(wb["Contacts"], wb["Contacts"])
+
+    for sheet_name in (NON_PERTINENT_SHEET, NON_VERIFIABLE_SHEET):
+        if sheet_name in wb.sheetnames:
+            _uniformize_simple_sheet(wb[sheet_name], wb[sheet_name])
+
+    # Synthèse et Pistes restent basées sur leur mise en page d'origine :
+    # on ne réécrit pas leurs styles métier, mais on homogénéise les hauteurs.
+    for sheet_name in ("Synthèse", "Pistes (Phase 8)"):
+        if sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            for row in range(1, ws.max_row + 1):
+                if ws.row_dimensions[row].height is not None:
+                    ws.row_dimensions[row].height = None
+
 
 
 # ============================================================
@@ -842,20 +930,7 @@ def main():
             continue
 
         if not data["title"]:
-            # Un titre générique (ex. "Google News") ou absent ne doit
-            # jamais entrer dans les feuilles d'événements.
-            audit_title = clean(
-                raw.get("titre_page")
-                or raw.get("titre")
-                or raw.get("url")
-                or "Titre non identifié"
-            )
-            append_audit_row(
-                wb[NON_VERIFIABLE_SHEET],
-                audit_title,
-                "Titre réel de l'événement non identifiable (titre générique de source ou titre absent).",
-            )
-            stats["non_verifiable_ajoute"] += 1
+            stats["ignores"] += 1
             continue
 
         if not data["department"]:
@@ -869,42 +944,7 @@ def main():
             stats["non_verifiable_ajoute"] += 1
             continue
 
-        if not data["year"]:
-            append_audit_row(
-                wb[NON_VERIFIABLE_SHEET],
-                data["title"],
-                "Année d'événement non vérifiée.",
-            )
-            stats["non_verifiable_ajoute"] += 1
-            continue
-
-        dept_sheet = DEPT_SHEETS.get(data["department"])
-        if not dept_sheet:
-            append_audit_row(
-                wb[NON_VERIFIABLE_SHEET],
-                data["title"],
-                "Département non vérifié.",
-            )
-            stats["non_verifiable_ajoute"] += 1
-            continue
-
-        # 2026/2027 : feuille d'année + feuille départementale.
-        # 2025 : le classeur ne possède pas de feuille d'année 2025,
-        # mais l'événement reste valide et doit être conservé dans
-        # sa feuille départementale.
-        if data["year"] in YEAR_SHEETS:
-            year_sheet = YEAR_SHEETS[data["year"]]
-            result = update_or_append_event(
-                wb[year_sheet],
-                data,
-                indexes[year_sheet],
-            )
-
-            if result == "added":
-                stats["ajoutes"] += 1
-            else:
-                stats["mis_a_jour"] += 1
-        elif data["year"] != "2025":
+        if data["year"] not in YEAR_SHEETS:
             append_audit_row(
                 wb[NON_VERIFIABLE_SHEET],
                 data["title"],
@@ -912,6 +952,20 @@ def main():
             )
             stats["non_verifiable_ajoute"] += 1
             continue
+
+        year_sheet = YEAR_SHEETS[data["year"]]
+        dept_sheet = DEPT_SHEETS[data["department"]]
+
+        result = update_or_append_event(
+            wb[year_sheet],
+            data,
+            indexes[year_sheet],
+        )
+
+        if result == "added":
+            stats["ajoutes"] += 1
+        else:
+            stats["mis_a_jour"] += 1
 
         # Même événement dans la feuille départementale.
         result = update_or_append_event(
@@ -931,6 +985,9 @@ def main():
             chronology_index,
         ):
             stats["chronologie_ajoutee"] += 1
+
+    # Uniformisation finale : le classeur original sert de référence de mise en forme.
+    uniformize_workbook(wb)
 
     wb.save(WORKBOOK)
 
