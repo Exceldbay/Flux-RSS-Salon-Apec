@@ -1102,8 +1102,8 @@ def appliquer_ia(pertinents, a_verifier):
         # ----------------------------------------------------
         
         if analyses > 0:
-    print(f"⏳ Cooldown Gemini : {IA_COOLDOWN_SECONDS}s")
-    time.sleep(IA_COOLDOWN_SECONDS)
+            print(f"⏳ Cooldown Gemini : {IA_COOLDOWN_SECONDS}s")
+            time.sleep(IA_COOLDOWN_SECONDS)
         
         analyse = analyser_resultat(resultat)
         analyses += 1
