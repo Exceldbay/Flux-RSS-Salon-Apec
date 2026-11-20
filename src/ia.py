@@ -154,4 +154,3 @@ Ne mets aucun texte avant ou après le JSON.
             "date_ia": "",
             "departement_ia": "",
         }
-*
