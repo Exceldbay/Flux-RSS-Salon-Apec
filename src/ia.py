@@ -89,6 +89,8 @@ def analyser_resultat(resultat):
             "signaux_superieur": resultat.get("signaux_superieur", ""),
             "signaux_entreprise": resultat.get("signaux_entreprise", ""),
             "signaux_exclusion": resultat.get("signaux_exclusion", ""),
+            "url_reelle": resultat.get("url_reelle", ""),
+            "extrait_page": str(resultat.get("extrait_page", ""))[:2000],
             "titre_page": resultat.get("titre_page", ""),
             "description_page": resultat.get("description_page", ""),
             "date_page": resultat.get("date_evenement_page", ""),
@@ -195,12 +197,21 @@ Département : {champs["departement"]}
 Géographie vérifiée : {champs["geographie"]}
 URL : {champs["url"]}
 
-PAGE ENRICHIE
+PAGE ENRICHIE (contenu réel de l'article ou de la page de l'événement)
+URL réelle : {champs["url_reelle"]}
 Titre : {champs["titre_page"]}
 Description : {champs["description_page"]}
 Date événement : {champs["date_page"]}
 Lieu : {champs["lieu_page"]}
 Organisateur : {champs["organisateur_page"]}
+Extrait du texte : {champs["extrait_page"]}
+
+UTILISATION DE LA PAGE
+- Appuie ta décision sur le texte de la page quand il est présent : public,
+  niveau d'études, entreprises, date, lieu, organisateur.
+- Si le texte de la page contredit le titre RSS, fais confiance à la page.
+- Si la page est vide ou absente, ne conclus pas à NON_PERTINENT pour ce seul
+  motif : choisis A_VERIFIER si le potentiel Apec reste plausible.
 
 DÉCISION
 PERTINENT = intérêt Apec clairement ou fortement démontré.
