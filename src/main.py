@@ -81,6 +81,12 @@ thread_local = threading.local()
 # CHARGEMENT CONFIGURATION
 # ============================================================
 
+def court(texte, n=70):
+    """Texte tronqué sur une ligne, pour des logs lisibles."""
+    t = " ".join(str(texte or "").split())
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
 def load_yaml(filename):
     with open(CONFIG / filename, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -680,12 +686,23 @@ def enrichir_candidats_ia(candidats):
 
     with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
         futures = [executor.submit(enrichir_page, resultat) for resultat in cible]
+        total_cible = len(cible)
+        faits = 0
+        echecs = 0
 
         for future in as_completed(futures):
+            faits += 1
             try:
                 future.result()
             except Exception:
-                pass
+                echecs += 1
+
+            if faits % 10 == 0 or faits == total_cible:
+                print(
+                    f"Enrichissement : {faits}/{total_cible} "
+                    f"| erreurs : {echecs}",
+                    flush=True,
+                )
 
     duree = time.time() - debut
     enrichis = sum(1 for r in cible if r.get("page_enrichie") == "OUI")
@@ -1108,6 +1125,12 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print(f"Candidats à analyser : {len(candidats)}")
     print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
+    total_prevu = min(len(candidats), MAX_IA_ANALYSES)
+    print(
+        f"Durée estimée : environ {total_prevu * COOLDOWN_IA_SECONDS / 60:.0f} min "
+        f"(cooldown {COOLDOWN_IA_SECONDS} s entre deux appels)"
+    )
+    print(flush=True)
 
     for resultat in candidats:
         statut_python = str(resultat.get("statut", "À vérifier"))
@@ -1216,6 +1239,25 @@ def appliquer_ia(pertinents, a_verifier):
             quota_detecte = True
             motif_arret = f"{erreurs_consecutives} erreurs Gemini consécutives"
 
+        icone = {
+            "PERTINENT": "🟢",
+            "A_VERIFIER": "🟠",
+            "NON_PERTINENT": "🔴",
+            "IA_INDISPONIBLE": "⚠️",
+        }.get(decision, "•")
+        detail = (
+            f"{resultat.get('confiance_ia', 0)}%"
+            if decision != "IA_INDISPONIBLE"
+            else (type_erreur or "erreur")
+        )
+        print(
+            f"[IA {analyses}/{total_prevu}] {icone} {decision} ({detail}) "
+            f"| dép. {resultat.get('departement', '?')} "
+            f"| score {resultat.get('score', 0)} "
+            f"| {court(resultat.get('titre', ''))}",
+            flush=True,
+        )
+
         if quota_detecte:
             quota_bloque = True
             print(f"⛔ Arrêt des appels IA : {motif_arret}")
@@ -1248,7 +1290,10 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+    non_traites = sum(1 for x in ia_resultats if x.get("decision_ia") == "IA_NON_ANALYSE")
+    print()
     print(f"Analyses IA effectuées : {analyses}")
+    print(f"Candidats non analysés (conservés) : {non_traites}")
     print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}"
           + (f" ({motif_arret})" if quota_bloque else ""))
     print(
