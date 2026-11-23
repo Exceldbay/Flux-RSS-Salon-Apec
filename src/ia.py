@@ -110,7 +110,15 @@ L'Apec s'intéresse principalement :
 - aux relations entreprises/recruteurs lorsqu'elles concernent ces publics.
 
 ZONE : 86, 79, 87, 17, 16, 23, 19.
-ANNÉES : 2025, 2026, 2027.
+ANNÉES : 2026 et 2027. L'année 2027 est PRIORITAIRE.
+
+RÈGLE D'ANNÉE
+- Édition 2027 (annoncée ou prévisionnelle) : forte valeur pour la veille.
+  Si l'intérêt Apec est plausible, choisis PERTINENT ou A_VERIFIER, jamais
+  NON_PERTINENT par simple manque de détails (dates ou programme pas encore publiés).
+- Édition 2026 : à traiter normalement.
+- Édition 2025 ou antérieure : NON_PERTINENT (hors période), sauf si le texte
+  annonce clairement une prochaine édition en 2026 ou 2027.
 
 PRINCIPE ESSENTIEL
 Ne demande jamais que les mots « cadre » ou « jeune diplômé » soient présents.
@@ -156,7 +164,8 @@ NON_PERTINENT si :
 - CCI comme événement ;
 - événement non identifiable ;
 - article éditorial qui ne permet pas d'identifier l'événement ;
-- hors zone lorsque cela est démontré.
+- hors zone lorsque cela est démontré ;
+- édition 2025 ou antérieure sans prochaine édition 2026/2027 annoncée.
 
 IMPORTANT
 Un simple mot « emploi », « formation », « étudiant » ou « recrutement »
