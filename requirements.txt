@@ -7,3 +7,4 @@ openpyxl
 PyYAML
 python-dateutil
 google-genai
+googlenewsdecoder
