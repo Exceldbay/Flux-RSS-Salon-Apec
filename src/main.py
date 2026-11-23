@@ -71,6 +71,8 @@ MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
 MAX_IA_ANALYSES = 100
+COOLDOWN_IA_SECONDS = 15      # pause entre deux appels Gemini
+MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 
 thread_local = threading.local()
 
@@ -1066,6 +1068,9 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux_pertinents = []
     nouveaux_a_verifier = []
     quota_bloque = False
+    erreurs_consecutives = 0
+    dernier_appel = 0.0
+    motif_arret = ""
 
     print()
     print("========================================")
@@ -1078,7 +1083,7 @@ def appliquer_ia(pertinents, a_verifier):
         statut_python = str(resultat.get("statut", "À vérifier"))
 
         # ----------------------------------------------------
-        # Plus d'appel après la limite de 50
+        # Plus d'appel après la limite d'analyses
         # ----------------------------------------------------
         if analyses >= MAX_IA_ANALYSES:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
@@ -1101,11 +1106,11 @@ def appliquer_ia(pertinents, a_verifier):
         # Quota Gemini déjà atteint : zéro nouvel appel
         # ----------------------------------------------------
         if quota_bloque:
-            resultat["decision_ia"] = "IA_INDISPONIBLE"
+            resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
             resultat["raison_ia"] = (
-                "Quota Gemini atteint ou indisponible : "
-                "aucun nouvel appel IA effectué."
+                f"Non analysé : appels IA arrêtés ({motif_arret}). "
+                "Candidat conservé pour vérification."
             )
             resultat["categorie_ia"] = ""
             resultat["date_ia"] = ""
@@ -1123,7 +1128,13 @@ def appliquer_ia(pertinents, a_verifier):
         # ----------------------------------------------------
         # Appel Gemini
         # ----------------------------------------------------
+        if dernier_appel:
+            attente = COOLDOWN_IA_SECONDS - (time.time() - dernier_appel)
+            if attente > 0:
+                time.sleep(attente)
+
         analyse = analyser_resultat(resultat)
+        dernier_appel = time.time()
         analyses += 1
         resultat.update(analyse)
         resultat["ia_analyse"] = "OUI"
@@ -1154,25 +1165,30 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["decision_ia"] = decision
 
         # ----------------------------------------------------
-        # Détection immédiate des quotas
+        # Détection des quotas et pannes (type d'erreur structuré)
         # ----------------------------------------------------
-        quota_detecte = (
-            decision == "IA_INDISPONIBLE"
-            and any(
-                terme in raison
-                for terme in (
-                    "429",
-                    "resource_exhausted",
-                    "resource exhausted",
-                    "quota",
-                    "rate limit",
-                    "too many requests",
-                )
-            )
-        )
+        type_erreur = str(analyse.get("erreur_ia_type", ""))
+
+        if decision == "IA_INDISPONIBLE":
+            erreurs_consecutives += 1
+        else:
+            erreurs_consecutives = 0
+
+        quota_detecte = False
+        if type_erreur in {"QUOTA_JOUR", "QUOTA_MINUTE", "CLE_ABSENTE"}:
+            quota_detecte = True
+            motif_arret = {
+                "QUOTA_JOUR": "quota quotidien Gemini atteint",
+                "QUOTA_MINUTE": "quota par minute persistant",
+                "CLE_ABSENTE": "clé GEMINI_API_KEY absente",
+            }[type_erreur]
+        elif erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
+            quota_detecte = True
+            motif_arret = f"{erreurs_consecutives} erreurs Gemini consécutives"
 
         if quota_detecte:
             quota_bloque = True
+            print(f"⛔ Arrêt des appels IA : {motif_arret}")
             # L'appel a bien été tenté, donc OUI, mais le résultat IA
             # ne remplace jamais le statut Python.
             resultat["statut_final"] = statut_python
@@ -1203,7 +1219,8 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     print(f"Analyses IA effectuées : {analyses}")
-    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}")
+    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}"
+          + (f" ({motif_arret})" if quota_bloque else ""))
     print(
         "Décisions IA : "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
@@ -1288,6 +1305,7 @@ def sauvegarder(
         "categorie_ia",
         "date_ia",
         "departement_ia",
+        "erreur_ia_type",
         "geographie_corrigee",
         "ia_analyse",
         "statut_final",
@@ -1380,7 +1398,10 @@ def sauvegarder(
         if decision == "IA_INDISPONIBLE":
             return (2, 0)
 
-        return (3, 0)
+        if decision == "IA_NON_ANALYSE":
+            return (3, -int(resultat.get("score", 0) or 0))
+
+        return (4, 0)
 
     candidats_ia.sort(key=cle_tri_ia)
 
