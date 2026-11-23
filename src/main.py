@@ -2,6 +2,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 import threading
 import time
 import re
@@ -74,6 +75,17 @@ MAX_IA_ANALYSES = 100
 COOLDOWN_IA_SECONDS = 15      # pause entre deux appels Gemini
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 
+# Gestion des années : 2027 est la priorité, 2025 et avant sont écartés.
+ANNEE_MIN = 2026          # toute information antérieure est retirée
+ANNEE_PRIORITAIRE = 2027  # recherchée plus largement et mise en avant
+BONUS_2027 = 12
+SEUIL_VERIF_2027 = 6      # seuil « À vérifier » assoupli pour 2027 (10 sinon)
+MALUS_HORS_PERIODE = 40
+# Un article publié avant cette date, sans année 2026+ dans le texte, est
+# considéré comme portant sur une édition 2025 ou antérieure. Les articles de
+# décembre 2025 restent candidats : ils peuvent annoncer un événement 2026.
+DATE_PUBLICATION_MIN = datetime(2025, 12, 1)
+
 thread_local = threading.local()
 
 
@@ -140,6 +152,35 @@ REQUETES_SUPERIEUR = [
     "journée portes ouvertes université",
     "alumni",
     "rencontre entreprises étudiants",
+]
+
+
+# Requêtes supplémentaires réservées à 2027 : formats indirects, annonces
+# de prochaines éditions et recherche par grandes villes.
+REQUETES_2027_EMPLOI = [
+    "forum entreprises",
+    "rencontres entreprises",
+    "career day",
+    "journée carrières",
+    "recrutement campus",
+    "forum alternance",
+    "semaine de l'emploi",
+    "networking",
+    "prochaine édition",
+    "save the date",
+    "édition 2027",
+]
+
+REQUETES_2027_SUPERIEUR = [
+    "salons et forums",
+    "forum alumni",
+]
+
+# Mots-clés combinés aux deux principales villes de chaque département.
+REQUETES_2027_VILLES = [
+    "forum emploi",
+    "forum entreprises",
+    "salon étudiant",
 ]
 
 
@@ -348,7 +389,25 @@ def contient_terme(texte, termes):
 
 
 def extraire_annees(texte):
+    """Années actuelles ou futures (2026 à 2028)."""
     return sorted(set(re.findall(r"\b20(?:26|27|28)\b", normaliser(texte))))
+
+
+def extraire_annees_passees(texte):
+    """Années 2010 à 2025 : informations considérées comme périmées."""
+    return sorted(set(re.findall(r"\b20(?:1\d|2[0-5])\b", normaliser(texte))))
+
+
+def date_publication_dt(date_publication):
+    """Date de publication RSS en datetime naïf, ou None si illisible."""
+    texte = str(date_publication or "").strip()
+    if not texte:
+        return None
+    try:
+        return parsedate_to_datetime(texte).replace(tzinfo=None)
+    except Exception:
+        trouve = re.search(r"\b(20\d{2})\b", texte)
+        return datetime(int(trouve.group(1)), 1, 1) if trouve else None
 
 
 def detecter_geographie(resultat):
@@ -379,8 +438,14 @@ def detecter_geographie(resultat):
 def construire_requetes(departements):
     requetes = []
 
+    # Les années antérieures à ANNEE_MIN ne sont plus recherchées.
+    annees = sorted(
+        {int(a) for a in departements["annees"] if int(a) >= ANNEE_MIN}
+        | {ANNEE_PRIORITAIRE}
+    )
+
     for code, nom in departements["departements"].items():
-        for annee in departements["annees"]:
+        for annee in annees:
 
             for mot in REQUETES_EMPLOI:
                 requetes.append({
@@ -402,6 +467,46 @@ def construire_requetes(departements):
                     "mot_cle": mot,
                 })
 
+            if annee != ANNEE_PRIORITAIRE:
+                continue
+
+            # Recherche élargie pour 2027.
+            for mot in REQUETES_2027_EMPLOI:
+                requetes.append({
+                    "departement": code,
+                    "nom_departement": nom,
+                    "annee": annee,
+                    "categorie_numero": 2,
+                    "categorie": "Emploi / recrutement / formation",
+                    "mot_cle": mot,
+                })
+
+            for mot in REQUETES_2027_SUPERIEUR:
+                requetes.append({
+                    "departement": code,
+                    "nom_departement": nom,
+                    "annee": annee,
+                    "categorie_numero": 1,
+                    "categorie": "Salon étudiant / enseignement supérieur",
+                    "mot_cle": mot,
+                })
+
+            for ville in VILLES_DEPARTEMENTS.get(code, [])[:2]:
+                for mot in REQUETES_2027_VILLES:
+                    requetes.append({
+                        "departement": code,
+                        "nom_departement": nom,
+                        "annee": annee,
+                        "categorie_numero": 1 if "étudiant" in mot else 2,
+                        "categorie": (
+                            "Salon étudiant / enseignement supérieur"
+                            if "étudiant" in mot
+                            else "Emploi / recrutement / formation"
+                        ),
+                        "mot_cle": mot,
+                        "lieu": ville,
+                    })
+
     return requetes
 
 
@@ -413,7 +518,7 @@ def rechercher_google_news(requete):
 
     texte = (
         f'"{requete["mot_cle"]}" '
-        f'"{requete["nom_departement"]}" '
+        f'"{requete.get("lieu") or requete["nom_departement"]}" '
         f'{requete["annee"]}'
     )
 
@@ -947,9 +1052,33 @@ def calculer_score(resultat):
     if annee and annee in annees:
         score += 3
         raisons.append(f"année {annee} détectée")
-    elif annees:
-        score -= 5
-        raisons.append("année différente détectée")
+
+    # 2027 : information prioritaire et fortement valorisée.
+    if str(ANNEE_PRIORITAIRE) in annees:
+        score += BONUS_2027
+        raisons.append(f"année {ANNEE_PRIORITAIRE} (prioritaire)")
+    elif "2028" in annees:
+        score += 6
+        raisons.append("année future 2028")
+    elif "2026" in annees:
+        score += 2
+
+    # 2025 et antérieur : retiré. Une année actuelle/future dans le texte
+    # (ex. une édition 2027 qui rappelle 2024) garde le résultat.
+    annees_passees = extraire_annees_passees(texte)
+    date_pub = date_publication_dt(resultat.get("date_publication", ""))
+    hors_periode = (not annees) and (
+        bool(annees_passees)
+        or (date_pub is not None and date_pub < DATE_PUBLICATION_MIN)
+    )
+    if hors_periode:
+        score -= MALUS_HORS_PERIODE
+        origine = (
+            ", ".join(annees_passees[:3])
+            if annees_passees
+            else f"publication {date_pub:%d/%m/%Y}"
+        )
+        raisons.append(f"hors période (≤ {ANNEE_MIN - 1}) : {origine}")
 
     # Présélection volontairement permissive : les cas ambigus sont envoyés
     # à Gemini plutôt que rejetés trop tôt.
@@ -962,13 +1091,23 @@ def calculer_score(resultat):
         raisons.append("contexte Apec: " + ", ".join(signaux_contexte[:4]))
 
     exclusion_forte = bool(exclusions)
-    if not evenement or not geo_ok or hors_geo:
-        statut = "À vérifier" if score >= 18 and not exclusion_forte else "Non pertinent"
+    est_2027 = str(ANNEE_PRIORITAIRE) in annees
+    seuil_verif = SEUIL_VERIF_2027 if est_2027 else 10
+    seuil_verif_hors_cadre = 12 if est_2027 else 18
+
+    if hors_periode:
+        statut = "Non pertinent"
+    elif not evenement or not geo_ok or hors_geo:
+        statut = (
+            "À vérifier"
+            if score >= seuil_verif_hors_cadre and not exclusion_forte
+            else "Non pertinent"
+        )
     elif exclusion_forte and score < 30:
         statut = "Non pertinent"
     elif score >= 24:
         statut = "Pertinent"
-    elif score >= 10:
+    elif score >= seuil_verif:
         statut = "À vérifier"
     else:
         statut = "Non pertinent"
@@ -1004,7 +1143,15 @@ def calculer_score(resultat):
         "signaux_exclusion": ", ".join(exclusions),
         "statut": statut,
         "raison": raison,
-        "motif": "",
+        "motif": "Hors période (2025 et antérieur)" if hors_periode else "",
+        "hors_periode": "OUI" if hors_periode else "NON",
+        "periode": (
+            "Hors période (≤2025)" if hors_periode
+            else "2027 (prioritaire)" if est_2027
+            else "2028" if "2028" in annees
+            else "2026" if "2026" in annees
+            else "Année non détectée"
+        ),
         "details_score": details,
         "evenement_detecte": "OUI" if evenement else "NON",
         "geographie_verifiee": "OUI" if geo_ok else "NON",
@@ -1020,11 +1167,16 @@ def traiter(resultats):
     pertinents = []
     a_verifier = []
     non_pertinents = []
+    ecartes_hors_periode = 0
 
     for resultat in resultats:
         corriger_departement_par_ville(resultat)
         score_data = calculer_score(resultat)
         resultat.update(score_data)
+
+        if resultat.get("hors_periode") == "OUI":
+            ecartes_hors_periode += 1
+            continue
 
         if resultat["statut"] == "Pertinent":
             pertinents.append(resultat)
@@ -1036,6 +1188,14 @@ def traiter(resultats):
     pertinents.sort(key=lambda x: x["score"], reverse=True)
     a_verifier.sort(key=lambda x: x["score"], reverse=True)
     non_pertinents.sort(key=lambda x: x["score"], reverse=True)
+
+    nb_2027 = sum(
+        1 for x in pertinents + a_verifier
+        if str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", ""))
+    )
+    print()
+    print(f"Résultats hors période (≤ {ANNEE_MIN - 1}) écartés : {ecartes_hors_periode}")
+    print(f"Candidats mentionnant {ANNEE_PRIORITAIRE} : {nb_2027}")
 
     return pertinents, a_verifier, non_pertinents
 
@@ -1107,7 +1267,14 @@ def appliquer_ia(pertinents, a_verifier):
     """Analyse les candidats avec Gemini sans perdre les décisions Python."""
 
     candidats = pertinents + a_verifier
-    candidats.sort(key=lambda x: x.get("score", 0), reverse=True)
+    # Les candidats 2027 passent en premier (quota Gemini limité).
+    candidats.sort(
+        key=lambda x: (
+            str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
+            x.get("score", 0),
+        ),
+        reverse=True,
+    )
     candidats = enrichir_candidats_ia(candidats)
 
     analyses = 0
@@ -1372,6 +1539,8 @@ def sauvegarder(
         "evenement_detecte",
         "geographie_verifiee",
         "annee_detectee",
+        "periode",
+        "hors_periode",
         "hors_perimetre",
         "hors_geographie",
         "decision_ia",
@@ -1457,26 +1626,22 @@ def sauvegarder(
 
     def cle_tri_ia(resultat):
         decision = resultat.get("decision_ia", "")
+        # 2027 d'abord à l'intérieur de chaque groupe.
+        rang_annee = 0 if str(ANNEE_PRIORITAIRE) in str(resultat.get("annee_detectee", "")) else 1
 
         if decision == "PERTINENT":
-            return (
-                0,
-                -int(resultat.get("confiance_ia", 0) or 0)
-            )
+            return (0, rang_annee, -int(resultat.get("confiance_ia", 0) or 0))
 
         if decision == "A_VERIFIER":
-            return (
-                1,
-                -int(resultat.get("score", 0) or 0)
-            )
+            return (1, rang_annee, -int(resultat.get("score", 0) or 0))
 
         if decision == "IA_INDISPONIBLE":
-            return (2, 0)
+            return (2, rang_annee, 0)
 
         if decision == "IA_NON_ANALYSE":
-            return (3, -int(resultat.get("score", 0) or 0))
+            return (3, rang_annee, -int(resultat.get("score", 0) or 0))
 
-        return (4, 0)
+        return (4, rang_annee, 0)
 
     candidats_ia.sort(key=cle_tri_ia)
 
