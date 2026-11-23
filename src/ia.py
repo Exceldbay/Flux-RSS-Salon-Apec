@@ -4,10 +4,8 @@ from google import genai
 
 MODEL = "gemini-3.1-flash-lite"
 
-
 def analyser_resultat(resultat):
-    """Analyse un résultat RSS selon la cible Apec cadres / jeunes diplômés."""
-
+    """Analyse finale Apec : cadres, jeunes diplômés et enseignement supérieur qualifié."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return {
@@ -22,184 +20,135 @@ def analyser_resultat(resultat):
     try:
         client = genai.Client(api_key=api_key)
 
-        titre = resultat.get("titre", "")
-        description = resultat.get("description", "")
-        source = resultat.get("source", "")
-        url = resultat.get("url", "")
-        date = resultat.get("date_publication", "")
-        annee_recherchee = resultat.get("annee_recherchee", "")
-        annee_detectee = resultat.get("annee_detectee", "")
-        departement = resultat.get("departement", "")
-        evenement_detecte = resultat.get("evenement_detecte", "")
-        geographie_verifiee = resultat.get("geographie_verifiee", "")
-
-        score_apec = resultat.get("score_cible_apec", resultat.get("score", 0))
-        signaux_cible = resultat.get("signaux_cible_apec", "")
-        signaux_superieur = resultat.get("signaux_superieur", "")
-        signaux_entreprise = resultat.get("signaux_entreprise", "")
-        signaux_exclusion = resultat.get("signaux_exclusion", "")
-
-        # Champs issus de l'enrichissement de la page lorsqu'ils existent.
-        titre_page = resultat.get("titre_page", "")
-        description_page = resultat.get("description_page", "")
-        date_evenement_page = resultat.get("date_evenement_page", "")
-        lieu_page = resultat.get("lieu_page", "")
-        organisateur_page = resultat.get("organisateur_page", "")
+        champs = {
+            "titre": resultat.get("titre", ""),
+            "description": resultat.get("description", ""),
+            "source": resultat.get("source", ""),
+            "url": resultat.get("url", ""),
+            "date": resultat.get("date_publication", ""),
+            "annee_recherchee": resultat.get("annee_recherchee", ""),
+            "annee_detectee": resultat.get("annee_detectee", ""),
+            "departement": resultat.get("departement", ""),
+            "evenement": resultat.get("evenement_detecte", ""),
+            "geographie": resultat.get("geographie_verifiee", ""),
+            "score": resultat.get("score_cible_apec", resultat.get("score", 0)),
+            "signaux_cible": resultat.get("signaux_cible_apec", ""),
+            "signaux_superieur": resultat.get("signaux_superieur", ""),
+            "signaux_entreprise": resultat.get("signaux_entreprise", ""),
+            "signaux_exclusion": resultat.get("signaux_exclusion", ""),
+            "titre_page": resultat.get("titre_page", ""),
+            "description_page": resultat.get("description_page", ""),
+            "date_page": resultat.get("date_evenement_page", ""),
+            "lieu_page": resultat.get("lieu_page", ""),
+            "organisateur_page": resultat.get("organisateur_page", ""),
+        }
 
         prompt = f"""
 Tu es l'analyste final d'une veille événementielle Apec.
 
-OBJECTIF
-Identifier les événements réellement utiles à l'Apec, avec une priorité sur :
-- les cadres en poste ou en recherche ;
-- les managers, experts et cadres dirigeants ;
-- les jeunes diplômés Bac+3/Bac+5 et plus ;
-- les étudiants de l'enseignement supérieur proches du diplôme ;
-- les masters, écoles d'ingénieurs, écoles de commerce, grandes écoles,
+CIBLE PRIORITAIRE
+L'Apec s'intéresse principalement :
+- aux cadres en poste ou en recherche ;
+- aux managers, experts et cadres dirigeants ;
+- aux jeunes diplômés Bac+3/Bac+5 et plus ;
+- aux étudiants de l'enseignement supérieur proches du diplôme ;
+- aux masters, écoles d'ingénieurs, écoles de commerce, grandes écoles,
   universités, IAE, doctorants, docteurs et alumni ;
-- les relations entreprises/recruteurs lorsqu'elles concernent un public
-  qualifié ou de l'enseignement supérieur.
+- aux relations entreprises/recruteurs lorsqu'elles concernent ces publics.
 
-ZONE : départements 86, 79, 87, 17, 16, 23, 19.
-ANNÉES RECHERCHÉES : 2025, 2026, 2027.
+ZONE : 86, 79, 87, 17, 16, 23, 19.
+ANNÉES : 2025, 2026, 2027.
 
-IMPORTANT : NE PAS EXIGER QUE LES MOTS « CADRE » OU « JEUNE DIPLÔMÉ »
-APPARAISSENT LITTÉRALEMENT.
+PRINCIPE ESSENTIEL
+Ne demande jamais que les mots « cadre » ou « jeune diplômé » soient présents.
+La pertinence peut être démontrée indirectement par le contexte.
 
-Un événement peut être PERTINENT lorsque le contexte démontre indirectement
-qu'il touche une population correspondant à la cible Apec.
+PERTINENT si l'un de ces cas est suffisamment démontré :
+1. cadres, managers, experts, dirigeants ou jeunes diplômés explicitement ciblés ;
+2. université/IAE/école supérieure + entreprises/employeurs/recruteurs +
+   étudiants/diplômés ;
+3. école d'ingénieurs, école de commerce ou grande école + entreprises,
+   recrutement, carrière ou insertion ;
+4. master/Bac+5/doctorat/ingénieurs/alumni + entreprises, recrutement,
+   carrière ou insertion ;
+5. rencontre entreprises, forum entreprises ou job dating dans un
+   établissement supérieur avec public qualifié ;
+6. mobilité, évolution professionnelle ou reconversion destinée à des actifs
+   qualifiés/cadres ;
+7. événement Apec ou Apec Connect.
 
-CRITÈRES PERTINENT
-Un événement peut être PERTINENT si au moins une des situations suivantes
-est clairement démontrée :
+EXEMPLES
+- « Forum entreprises – Université de Poitiers » peut être PERTINENT même sans
+  le mot « cadre » si la relation université + entreprises + étudiants/diplômés
+  est clairement établie.
+- « Rencontre entreprises / étudiants – Université X » peut être PERTINENT.
+- « Forum entreprises – école d'ingénieurs » est généralement PERTINENT.
 
-1. Il est explicitement destiné aux cadres, jeunes diplômés, diplômés,
-   managers, experts ou profils qualifiés.
+A_VERIFIER lorsque le potentiel Apec est réel mais qu'une information
+importante manque :
+- forum emploi avec employeurs mais public non précisé ;
+- événement universitaire avec entreprises mais niveau de diplôme non précisé ;
+- événement carrière/recrutement dont le public qualifié est plausible mais
+  pas suffisamment documenté.
 
-2. Il est organisé avec ou par une université, une école d'ingénieurs,
-   une école de commerce, une grande école, un IAE ou une structure
-   d'enseignement supérieur ET comporte une vraie relation avec des
-   entreprises, employeurs, recruteurs, recrutement, carrières ou insertion
-   professionnelle.
-
-3. Il s'agit d'un forum entreprises / rencontre entreprises / job dating /
-   recrutement dans un établissement d'enseignement supérieur, avec un
-   public étudiant, diplômé, master, ingénieur ou autre public qualifié.
-
-4. Il concerne des masters, Bac+5, doctorants, docteurs, ingénieurs,
-   alumni ou jeunes talents et comporte une dimension entreprises,
-   recrutement, carrière ou insertion.
-
-5. Il s'agit d'un événement de mobilité, évolution professionnelle ou
-   reconversion et le public visé est composé d'actifs qualifiés, cadres
-   ou profils professionnels correspondant à l'Apec.
-
-6. Il est explicitement lié à Apec, Apec Connect ou à une action Apec.
-
-7. Un forum général de l'emploi peut être PERTINENT si les informations
-   disponibles montrent un public qualifié, des employeurs ciblant des
-   diplômés/cadres, ou une forte composante enseignement supérieur.
-
-EXEMPLE IMPORTANT
-« Forum entreprises – Université de Poitiers » peut être PERTINENT même si
-la page ne contient pas le mot « cadre », lorsque la relation université +
-entreprises + étudiants/diplômés est clairement établie.
-
-« Rencontre entreprises / étudiants – Université X » peut également être
-PERTINENT si le contexte indique un public d'enseignement supérieur.
-
-À NE PAS FAIRE
-- Ne pas rejeter un événement uniquement parce que « cadre » n'est pas écrit.
-- Ne pas rejeter un événement uniquement parce que le public exact n'est
-  pas détaillé si un contexte enseignement supérieur + entreprises est clair.
-- Ne pas considérer automatiquement tout événement universitaire comme
-  pertinent : il faut une dimension professionnelle, entreprise, recrutement,
-  carrière ou insertion, sauf événement explicitement destiné aux diplômés,
-  alumni ou cadres.
-- Ne pas considérer automatiquement tout « forum emploi » comme pertinent.
-
-NON_PERTINENT
-Rejeter clairement :
-- jobs étudiants ;
-- jobs d'été ;
-- jobs saisonniers ;
+NON_PERTINENT si :
+- jobs étudiants, jobs d'été ou saisonniers ;
 - petits boulots ;
-- recrutement principalement restauration ;
-- caisse, manutention, préparation de commandes ou emplois similaires ;
+- restauration, caisse, manutention, préparation de commandes ;
 - intérim généraliste sans public qualifié ;
 - emplois sans qualification ;
-- événements uniquement collège ;
-- événements uniquement lycée ;
-- orientation post-3e ;
+- collège, lycée, post-3e ;
 - orientation générale pré-Bac+3 sans dimension Apec ;
-- événements commerciaux ou grand public sans lien professionnel pertinent ;
-- événement qui n'est pas réellement identifiable ;
-- simple article d'actualité mentionnant un événement sans permettre
-  d'identifier l'événement ;
-- événements hors zone géographique lorsque l'information le démontre ;
-- CCI comme événement, conformément aux règles du projet.
+- événement purement commercial ou grand public sans intérêt professionnel ;
+- CCI comme événement ;
+- événement non identifiable ;
+- article éditorial qui ne permet pas d'identifier l'événement ;
+- hors zone lorsque cela est démontré.
 
-A_VERIFIER
-Utiliser A_VERIFIER lorsqu'un intérêt Apec réel est possible mais qu'une
-information importante manque pour conclure.
+IMPORTANT
+Un simple mot « emploi », « formation », « étudiant » ou « recrutement »
+ne suffit pas.
+Mais une combinaison cohérente de signaux doit être valorisée.
 
-Exemples :
-- forum emploi avec entreprises clairement présentes mais public insuffisamment
-  documenté ;
-- événement universitaire avec employeurs mais niveau de diplôme non précisé ;
-- rencontre professionnelle pouvant concerner des cadres mais public ambigu ;
-- date, lieu ou public à confirmer.
+En cas de doute entre NON_PERTINENT et un intérêt Apec plausible,
+choisis A_VERIFIER. Ne transforme pas une absence d'information en preuve
+d'absence.
 
-IMPORTANT SUR LES FAUX NÉGATIFS
-En cas de combinaison forte :
-enseignement supérieur + entreprises/recruteurs + étudiants/diplômés,
-préférer PERTINENT ou A_VERIFIER plutôt que NON_PERTINENT.
+DONNÉES PYTHON
+Score : {champs["score"]}
+Cible directe : {champs["signaux_cible"]}
+Enseignement supérieur : {champs["signaux_superieur"]}
+Relation entreprises : {champs["signaux_entreprise"]}
+Exclusions : {champs["signaux_exclusion"]}
 
-En cas de combinaison :
-cadres/diplômés/alumni/école supérieure + recrutement/carrière/entreprises,
-préférer PERTINENT.
+SOURCE RSS
+Titre : {champs["titre"]}
+Description : {champs["description"]}
+Source : {champs["source"]}
+Date publication : {champs["date"]}
+Année recherchée : {champs["annee_recherchee"]}
+Année détectée : {champs["annee_detectee"]}
+Département : {champs["departement"]}
+Événement détecté : {champs["evenement"]}
+Géographie vérifiée : {champs["geographie"]}
+URL : {champs["url"]}
 
-Ne jamais inventer une information absente de la source.
-
-DONNÉES DE SCORING PYTHON
-Score Apec : {score_apec}
-Cible directe : {signaux_cible}
-Enseignement supérieur : {signaux_superieur}
-Relation entreprises : {signaux_entreprise}
-Exclusions détectées : {signaux_exclusion}
-
-DONNÉES RSS
-Titre : {titre}
-Description : {description}
-Source : {source}
-Date publication : {date}
-Année recherchée : {annee_recherchee}
-Année détectée : {annee_detectee}
-Département : {departement}
-Événement détecté : {evenement_detecte}
-Géographie vérifiée : {geographie_verifiee}
-URL : {url}
-
-DONNÉES PAGE ENRICHIE
-Titre page : {titre_page}
-Description page : {description_page}
-Date événement page : {date_evenement_page}
-Lieu page : {lieu_page}
-Organisateur page : {organisateur_page}
+PAGE ENRICHIE
+Titre : {champs["titre_page"]}
+Description : {champs["description_page"]}
+Date événement : {champs["date_page"]}
+Lieu : {champs["lieu_page"]}
+Organisateur : {champs["organisateur_page"]}
 
 DÉCISION
-- PERTINENT = intérêt Apec suffisamment démontré.
-- A_VERIFIER = potentiel Apec réel mais preuve insuffisante ou information
-  importante à confirmer.
-- NON_PERTINENT = hors cible ou exclusion claire.
+PERTINENT = intérêt Apec clairement ou fortement démontré.
+A_VERIFIER = potentiel réel mais preuve insuffisante.
+NON_PERTINENT = hors cible ou exclusion claire.
 
+Ne jamais inventer une date, un lieu, un public, un diplôme ou un organisateur.
 La confiance est un entier de 0 à 100.
-Le champ date contient uniquement une date d'événement explicitement
-identifiable. Ne jamais inventer une date.
-Le département doit être celui explicitement identifiable dans les données.
-Si absent, laisser vide.
 
-Réponds UNIQUEMENT avec un JSON valide :
+Réponds UNIQUEMENT avec ce JSON :
 {{
   "decision": "PERTINENT|A_VERIFIER|NON_PERTINENT",
   "confiance": 0,
@@ -208,8 +157,6 @@ Réponds UNIQUEMENT avec un JSON valide :
   "date": "",
   "departement": ""
 }}
-
-Aucun texte avant ou après le JSON.
 """
 
         response = client.models.generate_content(
@@ -217,12 +164,9 @@ Aucun texte avant ou après le JSON.
             contents=prompt,
         )
 
-        texte = response.text.strip()
-
+        texte = (response.text or "").strip()
         if texte.startswith("```"):
-            texte = texte.replace("```json", "")
-            texte = texte.replace("```", "")
-            texte = texte.strip()
+            texte = texte.replace("```json", "").replace("```", "").strip()
 
         data = json.loads(texte)
 
@@ -250,7 +194,7 @@ Aucun texte avant ou après le JSON.
         return {
             "decision_ia": "IA_INDISPONIBLE",
             "confiance_ia": 0,
-            "raison_ia": f"Erreur IA : {str(e)[:300]}",
+            "raison_ia": f"Erreur IA : {type(e).__name__} : {str(e)[:300]}",
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
