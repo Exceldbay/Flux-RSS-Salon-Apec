@@ -70,8 +70,7 @@ OUTPUT = ROOT / "output"
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
-MAX_IA_ANALYSES = 50
-IA_COOLDOWN_SECONDS = 15
+MAX_IA_ANALYSES = 100
 
 thread_local = threading.local()
 
@@ -771,6 +770,18 @@ SUPERIEUR_FORT = [
     "anciens élèves", "doctorat", "doctorants", "ingénieurs",
 ]
 
+CONTEXTE_APEC = [
+    "université", "universitaire", "master", "mastère", "bac+3", "bac+4",
+    "bac+5", "doctorat", "doctorant", "docteur", "ingénieur", "ingénieurs",
+    "école d'ingénieurs", "école d’ingénieurs", "école de commerce",
+    "grande école", "grandes écoles", "iae", "alumni", "anciens élèves",
+    "forum entreprises", "forum entreprise", "rencontre entreprises",
+    "rencontres entreprises", "entreprises et étudiants",
+    "entreprises et diplômés", "relations entreprises", "recruteurs",
+    "employeurs", "career", "carrière", "insertion professionnelle",
+    "mobilité professionnelle", "évolution professionnelle", "reconversion",
+]
+
 EXCLUSIONS_FORTES = [
     "job étudiant", "jobs étudiants", "emploi étudiant", "emplois étudiants",
     "job saisonnier", "jobs saisonniers", "emploi saisonnier", "emplois saisonniers",
@@ -897,12 +908,24 @@ def calculer_score(resultat):
         score -= 5
         raisons.append("année différente détectée")
 
-    # Seuils : on garde un sas À vérifier pour ne pas perdre les faux négatifs.
+    # Présélection volontairement permissive : les cas ambigus sont envoyés
+    # à Gemini plutôt que rejetés trop tôt.
+    signaux_contexte = contient_terme(texte, CONTEXTE_APEC)
+    if superieur and entreprise:
+        score += 8
+        raisons.append("enseignement supérieur + relation entreprises")
+    if signaux_contexte:
+        score += min(8, 2 * len(signaux_contexte))
+        raisons.append("contexte Apec: " + ", ".join(signaux_contexte[:4]))
+
+    exclusion_forte = bool(exclusions)
     if not evenement or not geo_ok or hors_geo:
-        statut = "Non pertinent" if score < 18 else "À vérifier"
+        statut = "À vérifier" if score >= 18 and not exclusion_forte else "Non pertinent"
+    elif exclusion_forte and score < 30:
+        statut = "Non pertinent"
     elif score >= 24:
         statut = "Pertinent"
-    elif score >= 13:
+    elif score >= 10:
         statut = "À vérifier"
     else:
         statut = "Non pertinent"
@@ -1096,13 +1119,6 @@ def appliquer_ia(pertinents, a_verifier):
             else:
                 nouveaux_a_verifier.append(resultat)
             continue
-
-        # ----------------------------------------------------
-        # Cooldown Gemini : éviter les appels trop rapprochés
-        # ----------------------------------------------------
-        if analyses > 0:
-            print(f"⏳ Cooldown Gemini : {IA_COOLDOWN_SECONDS}s")
-            time.sleep(IA_COOLDOWN_SECONDS)
 
         # ----------------------------------------------------
         # Appel Gemini
