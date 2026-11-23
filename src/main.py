@@ -157,23 +157,30 @@ REQUETES_SUPERIEUR = [
 
 # Requêtes supplémentaires réservées à 2027 : formats indirects, annonces
 # de prochaines éditions et recherche par grandes villes.
+# (mot-clé entre guillemets, complément libre). Le complément n'est pas mis
+# entre guillemets : il oriente la recherche vers les annonces d'éditions
+# futures sans exiger une expression exacte. Les termes génériques seuls
+# (« édition 2027 », « save the date ») ramenaient surtout des festivals et
+# de la politique : ils sont toujours associés à un contexte emploi/études.
 REQUETES_2027_EMPLOI = [
-    "forum entreprises",
-    "rencontres entreprises",
-    "career day",
-    "journée carrières",
-    "recrutement campus",
-    "forum alternance",
-    "semaine de l'emploi",
-    "networking",
-    "prochaine édition",
-    "save the date",
-    "édition 2027",
+    ("forum entreprises", ""),
+    ("rencontres entreprises", ""),
+    ("career day", ""),
+    ("journée carrières", ""),
+    ("recrutement campus", ""),
+    ("forum alternance", ""),
+    ("semaine de l'emploi", ""),
+    ("forum emploi", "prochaine édition"),
+    ("salon emploi", "prochaine édition"),
+    ("job dating", "prochaine édition"),
+    ("forum entreprises", "prochaine édition"),
 ]
 
 REQUETES_2027_SUPERIEUR = [
-    "salons et forums",
-    "forum alumni",
+    ("salons et forums", ""),
+    ("forum alumni", ""),
+    ("salon étudiant", "prochaine édition"),
+    ("portes ouvertes", "université école"),
 ]
 
 # Mots-clés combinés aux deux principales villes de chaque département.
@@ -471,7 +478,7 @@ def construire_requetes(departements):
                 continue
 
             # Recherche élargie pour 2027.
-            for mot in REQUETES_2027_EMPLOI:
+            for mot, complement in REQUETES_2027_EMPLOI:
                 requetes.append({
                     "departement": code,
                     "nom_departement": nom,
@@ -479,9 +486,10 @@ def construire_requetes(departements):
                     "categorie_numero": 2,
                     "categorie": "Emploi / recrutement / formation",
                     "mot_cle": mot,
+                    "complement": complement,
                 })
 
-            for mot in REQUETES_2027_SUPERIEUR:
+            for mot, complement in REQUETES_2027_SUPERIEUR:
                 requetes.append({
                     "departement": code,
                     "nom_departement": nom,
@@ -489,6 +497,7 @@ def construire_requetes(departements):
                     "categorie_numero": 1,
                     "categorie": "Salon étudiant / enseignement supérieur",
                     "mot_cle": mot,
+                    "complement": complement,
                 })
 
             for ville in VILLES_DEPARTEMENTS.get(code, [])[:2]:
@@ -519,7 +528,8 @@ def rechercher_google_news(requete):
     texte = (
         f'"{requete["mot_cle"]}" '
         f'"{requete.get("lieu") or requete["nom_departement"]}" '
-        f'{requete["annee"]}'
+        + (f'{requete["complement"]} ' if requete.get("complement") else "")
+        + f'{requete["annee"]}'
     )
 
     url = (
