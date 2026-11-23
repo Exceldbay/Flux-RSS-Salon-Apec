@@ -1,8 +1,60 @@
 import os
 import json
+import time
 from google import genai
 
 MODEL = "gemini-3.1-flash-lite"
+
+# Attente (secondes) avant de retenter après une erreur temporaire 503.
+ATTENTES_503 = (20, 45)
+# Attente avant de retenter après un quota par minute (429 « PerMinute »).
+ATTENTE_QUOTA_MINUTE = 65
+
+
+def _classer_erreur(exc):
+    """Retourne (type, message) : QUOTA_JOUR, QUOTA_MINUTE, TEMPORAIRE ou AUTRE."""
+    msg = f"{type(exc).__name__} : {exc}"
+    bas = msg.lower()
+
+    if "429" in bas or "resource_exhausted" in bas or "quota" in bas:
+        if "perday" in bas or "per day" in bas:
+            return "QUOTA_JOUR", msg
+        if "perminute" in bas or "per minute" in bas:
+            return "QUOTA_MINUTE", msg
+        # Quota de nature inconnue : on le traite comme bloquant par prudence.
+        return "QUOTA_JOUR", msg
+
+    if any(t in bas for t in ("503", "unavailable", "500", "504", "timeout", "deadline")):
+        return "TEMPORAIRE", msg
+
+    return "AUTRE", msg
+
+
+def _appeler_gemini(client, prompt):
+    """Appel Gemini avec reprises limitées. Lève l'exception finale si échec."""
+    tentative_503 = 0
+    quota_minute_retente = False
+
+    while True:
+        try:
+            return client.models.generate_content(model=MODEL, contents=prompt)
+        except Exception as exc:
+            type_err, _ = _classer_erreur(exc)
+
+            if type_err == "TEMPORAIRE" and tentative_503 < len(ATTENTES_503):
+                attente = ATTENTES_503[tentative_503]
+                tentative_503 += 1
+                print(f"   ⏳ Gemini temporairement indisponible, nouvelle tentative dans {attente} s")
+                time.sleep(attente)
+                continue
+
+            if type_err == "QUOTA_MINUTE" and not quota_minute_retente:
+                quota_minute_retente = True
+                print(f"   ⏳ Quota par minute atteint, attente de {ATTENTE_QUOTA_MINUTE} s")
+                time.sleep(ATTENTE_QUOTA_MINUTE)
+                continue
+
+            raise
 
 def analyser_resultat(resultat):
     """Analyse finale Apec : cadres, jeunes diplômés et enseignement supérieur qualifié."""
@@ -15,6 +67,7 @@ def analyser_resultat(resultat):
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
+            "erreur_ia_type": "CLE_ABSENTE",
         }
 
     try:
@@ -159,10 +212,7 @@ Réponds UNIQUEMENT avec ce JSON :
 }}
 """
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt,
-        )
+        response = _appeler_gemini(client, prompt)
 
         texte = (response.text or "").strip()
         if texte.startswith("```"):
@@ -188,14 +238,17 @@ Réponds UNIQUEMENT avec ce JSON :
             "categorie_ia": data.get("categorie", ""),
             "date_ia": data.get("date", ""),
             "departement_ia": data.get("departement", ""),
+            "erreur_ia_type": "",
         }
 
     except Exception as e:
+        type_err, msg = _classer_erreur(e)
         return {
             "decision_ia": "IA_INDISPONIBLE",
             "confiance_ia": 0,
-            "raison_ia": f"Erreur IA : {type(e).__name__} : {str(e)[:300]}",
+            "raison_ia": f"Erreur IA ({type_err}) : {msg[:300]}",
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
+            "erreur_ia_type": type_err,
         }
