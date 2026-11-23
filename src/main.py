@@ -396,8 +396,21 @@ def contient_terme(texte, termes):
 
 
 def extraire_annees(texte):
-    """Années actuelles ou futures (2026 à 2028)."""
-    return sorted(set(re.findall(r"\b20(?:26|27|28)\b", normaliser(texte))))
+    """Années actuelles ou futures (2026 à 2028).
+
+    - « 26/27 », « 2026-2027 », « 2026/27 » comptent pour les deux années ;
+    - une période commençant avant 2025 (« 2023-2027 » : plan, contrat,
+      programme pluriannuel) n'est pas une édition 2027 et est ignorée.
+    """
+    t = normaliser(texte)
+    t = re.sub(r"\b20(?:1\d|2[0-4])\s*[-–/]\s*(?:20)?2[6-9]\b", " ", t)
+    annees = set(re.findall(r"\b20(?:26|27|28)\b", t))
+    for debut, fin in re.findall(
+        r"\b(?:20)?(2[6-8])\s*[/\-–]\s*(?:20)?(2[6-8])\b", t
+    ):
+        annees.add("20" + debut)
+        annees.add("20" + fin)
+    return sorted(annees)
 
 
 def extraire_annees_passees(texte):
@@ -675,14 +688,84 @@ def extraire_meta(soup, noms):
     return ""
 
 
+def est_lien_google_news(url):
+    return "news.google.com" in str(url or "").lower()
+
+
+def decoder_liens_google(candidats):
+    """
+    Remplace les liens Google News (redirections chiffrées) par l'URL réelle
+    de l'article, afin que l'IA lise la vraie page et non la page d'accueil
+    de Google News. Un seul appel par lot ; tout échec est non bloquant.
+    """
+    cibles = [
+        c for c in candidats
+        if est_lien_google_news(c.get("url")) and not c.get("url_reelle")
+    ]
+    if not cibles:
+        return 0
+
+    try:
+        from googlenewsdecoder import gnewsdecoder
+    except Exception as e:
+        print(f"⚠️ googlenewsdecoder indisponible ({type(e).__name__}) : "
+              "liens Google News non décodés. Ajoutez-le à requirements.txt.")
+        return 0
+
+    decodes = 0
+    TAILLE_LOT = 20
+
+    for debut in range(0, len(cibles), TAILLE_LOT):
+        lot = cibles[debut:debut + TAILLE_LOT]
+        try:
+            reponses = gnewsdecoder([c["url"] for c in lot], timeout=15)
+        except Exception as e:
+            print(f"⚠️ Décodage Google News en échec sur un lot : "
+                  f"{type(e).__name__} : {str(e)[:120]}")
+            continue
+
+        for candidat, rep in zip(lot, reponses):
+            if isinstance(rep, dict) and rep.get("success") and rep.get("decoded_url"):
+                candidat["url_reelle"] = rep["decoded_url"]
+                decodes += 1
+
+        time.sleep(1)
+
+    print(f"Liens Google News décodés : {decodes}/{len(cibles)}", flush=True)
+    return decodes
+
+
+def extraire_texte_page(soup, limite=2500):
+    """Texte lisible de l'article (balises article/main, sinon paragraphes)."""
+    for balise in soup(["script", "style", "nav", "footer", "header",
+                        "aside", "form", "noscript", "iframe"]):
+        balise.decompose()
+
+    zone = soup.find("article") or soup.find("main") or soup.body or soup
+    paragraphes = [
+        p.get_text(" ", strip=True)
+        for p in zone.find_all(["h1", "h2", "h3", "p", "li"])
+    ]
+    texte = " ".join(p for p in paragraphes if len(p) > 25)
+    return " ".join(texte.split())[:limite]
+
+
 def enrichir_page(resultat):
     """
     Récupère des informations complémentaires sur la page source.
     L'enrichissement est limité aux candidats IA afin de ne pas
     ralentir la collecte RSS.
     """
-    url = resultat.get("url", "")
+    url = resultat.get("url_reelle") or resultat.get("url", "")
     if not url:
+        return resultat
+
+    # Lien Google News non décodé : la page récupérée serait celle de Google,
+    # sans rapport avec l'article. On n'enrichit pas (et on ne pollue pas
+    # la description envoyée à l'IA).
+    if est_lien_google_news(url):
+        resultat["page_enrichie"] = "NON"
+        resultat["erreur_enrichissement"] = "lien Google News non décodé"
         return resultat
 
     try:
@@ -697,6 +780,10 @@ def enrichir_page(resultat):
         soup = BeautifulSoup(response.content, "lxml")
 
         titre_page = soup.title.get_text(" ", strip=True) if soup.title else ""
+        # Extrait calculé sur une copie : l'extraction retire des balises.
+        extrait_page = extraire_texte_page(
+            BeautifulSoup(response.content, "lxml")
+        )
         description_page = extraire_meta(
             soup, ["description", "og:description", "twitter:description"]
         )
@@ -757,6 +844,7 @@ def enrichir_page(resultat):
         resultat["date_evenement_page"] = date_evenement[:100]
         resultat["lieu_page"] = normaliser(lieu_page)[:300]
         resultat["organisateur_page"] = normaliser(organisateur_page)[:300]
+        resultat["extrait_page"] = extrait_page
         resultat["page_enrichie"] = "OUI"
 
         # L'IA reçoit les informations complémentaires sans modifier
@@ -798,6 +886,7 @@ def enrichir_candidats_ia(candidats):
 
     debut = time.time()
     cible = candidats[:MAX_IA_ANALYSES]
+    decoder_liens_google(cible)
 
     with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
         futures = [executor.submit(enrichir_page, resultat) for resultat in cible]
@@ -967,7 +1056,7 @@ def calculer_score(resultat):
     source = normaliser(resultat.get("source", ""))
     page = normaliser(
         " ".join(str(resultat.get(k, "")) for k in (
-            "titre_page", "description_page", "lieu_page", "organisateur_page"
+        "titre_page", "description_page", "lieu_page", "organisateur_page"
         ))
     )
     texte = f"{titre} {description} {page}"
@@ -1270,7 +1359,7 @@ def classer_statut_final(resultat, decision):
     return resultat
 
 # ============================================================
-# COUCHE IA externe 
+# COUCHE IA GEMINI
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier):
@@ -1390,8 +1479,20 @@ def appliquer_ia(pertinents, a_verifier):
             decision = "A_VERIFIER"
             resultat["decision_ia"] = decision
 
-        if dept_ia and dept_ia not in {"16", "17", "19", "23", "79", "86", "87"}:
-            decision = "A_VERIFIER"
+        zone = {"16", "17", "19", "23", "79", "86", "87"}
+        if dept_ia and dept_ia not in zone:
+            if resultat.get("geographie_verifiee") == "OUI":
+                # Python a trouvé des indices géographiques dans la zone :
+                # le désaccord est ambigu, vérification humaine.
+                decision = "A_VERIFIER"
+            else:
+                # Le département Python vient seulement de la requête et
+                # rien ne le confirme : l'IA situe l'événement hors zone.
+                decision = "NON_PERTINENT"
+                resultat["raison_ia"] = (
+                    str(resultat.get("raison_ia", ""))
+                    + f" | Hors zone confirmé (département IA : {dept_ia})."
+                ).strip(" |")
             resultat["decision_ia"] = decision
 
         # ----------------------------------------------------
@@ -1511,8 +1612,10 @@ def sauvegarder(
         "source",
         "description",
         "url_finale",
+        "url_reelle",
         "titre_page",
         "description_page",
+        "extrait_page",
         "date_evenement_page",
         "lieu_page",
         "organisateur_page",
