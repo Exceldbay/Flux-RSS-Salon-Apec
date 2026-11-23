@@ -1270,7 +1270,7 @@ def classer_statut_final(resultat, decision):
     return resultat
 
 # ============================================================
-# COUCHE IA GEMINI
+# COUCHE IA externe 
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier):
