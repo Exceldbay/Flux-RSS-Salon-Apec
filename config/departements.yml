@@ -7,7 +7,8 @@ departements:
   "23": "Creuse"
   "19": "Corrèze"
 
+# 2025 et antérieur sont retirés. 2027 est l'année prioritaire :
+# elle est recherchée plus largement (requêtes supplémentaires dans main.py).
 annees:
-  - 2025
   - 2026
   - 2027
