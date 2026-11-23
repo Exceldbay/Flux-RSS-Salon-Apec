@@ -800,7 +800,28 @@ EXCLUSIONS_EDITORIAL = [
     "palmarès", "retour sur", "en images", "recensement", "vie locale",
 ]
 
-EVENT_SIGNAL_CIBLE = EVENTS_EMPLOI + EVENTS_SUPERIEUR
+# Formats événementiels indirects : ils ne s'appellent pas « salon emploi »
+# mais restent de vrais événements Apec potentiels (réflexion Apec, point 10).
+EVENTS_INDIRECTS = [
+    "forum entreprises", "forum entreprise", "forum des entreprises",
+    "rencontre entreprises", "rencontres entreprises",
+    "rencontre avec les entreprises", "rencontres avec les entreprises",
+    "salons et forums", "salons & forums", "salon et forum", "salons, forums",
+    "career day", "career days", "career fair",
+    "job fair", "job meeting", "job days",
+    "journée carrières", "journée carrière", "journée des carrières",
+    "journées carrières", "semaine de l'emploi", "semaine de l’emploi",
+    "semaine carrière", "semaine carrières", "semaine entreprises",
+    "forum des métiers", "rencontres métiers", "rencontre métiers",
+    "journée professionnelle", "journée entreprises", "journée des entreprises",
+    "speed recruiting", "speed dating emploi", "recrutement campus",
+    "campus recruitment", "recruitment day", "graduate programme",
+    "forum alumni", "networking", "forum de l'alternance",
+    "forum de l’alternance", "forum de l'emploi", "forum de l’emploi",
+    "forum de recrutement", "forum du recrutement",
+]
+
+EVENT_SIGNAL_CIBLE = EVENTS_EMPLOI + EVENTS_SUPERIEUR + EVENTS_INDIRECTS
 
 
 def calculer_score(resultat):
@@ -829,6 +850,7 @@ def calculer_score(resultat):
     editorial = _signaux(texte, EXCLUSIONS_EDITORIAL)
     event_emploi = _signaux(texte, EVENTS_EMPLOI)
     event_superieur = _signaux(texte, EVENTS_SUPERIEUR)
+    event_indirect = _signaux(texte, EVENTS_INDIRECTS)
 
     geo_ok, dept_present, villes_presentes, hors_geo = detecter_geographie(resultat)
     annees = extraire_annees(texte)
@@ -837,10 +859,12 @@ def calculer_score(resultat):
     raisons = []
 
     # Nature événementielle : nécessaire mais volontairement peu pondérée.
-    evenement = bool(event_emploi or event_superieur)
+    evenement = bool(event_emploi or event_superieur or event_indirect)
     if evenement:
         score += 6
         raisons.append("format événementiel identifié")
+        if event_indirect and not (event_emploi or event_superieur):
+            raisons.append("format indirect: " + ", ".join(event_indirect[:3]))
     else:
         score -= 12
         raisons.append("événement non clairement identifiable")
@@ -931,6 +955,12 @@ def calculer_score(resultat):
         statut = "À vérifier"
     else:
         statut = "Non pertinent"
+
+    # Format détecté uniquement de façon indirecte (ex. « salons & forums ») :
+    # la preuve est insuffisante pour conclure sans vérification (IA ou humaine).
+    if statut == "Pertinent" and event_indirect and not (event_emploi or event_superieur):
+        statut = "À vérifier"
+        raisons.append("plafonné à « À vérifier » : format événementiel indirect seulement")
 
     raison = {
         "Pertinent": "Cible Apec clairement démontrée",
