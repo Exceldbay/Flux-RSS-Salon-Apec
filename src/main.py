@@ -2509,7 +2509,7 @@ def main():
     demarrer_tache(0, f"{len(requetes)} requêtes")
     try:
         resultats_bruts, erreurs = collecter(requetes)
-        terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {len(erreurs)} erreurs")
+        terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {erreurs} erreurs")
     except Exception as e:
         echouer_tache(0, str(e))
         sauvegarder_suivi_taches()
