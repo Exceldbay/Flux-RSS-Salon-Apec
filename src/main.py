@@ -105,7 +105,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-24-v8-delta"
+VERSION_PROGRAMME = "2026-11-24-v8-operateurs-web"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -577,8 +577,59 @@ def detecter_geographie(resultat):
 # CONSTRUCTION DES REQUÊTES
 # ============================================================
 
+# ============================================================
+# OPERATEURS WEB V2 — recherche élargie mais maîtrisée
+# ============================================================
+# Les requêtes historiques restent inchangées. Cette seconde passe ajoute
+# des combinaisons documentées de recherche : expressions exactes, exclusions
+# et domaines institutionnels. Elles servent à découvrir des événements que
+# les requêtes génériques ratent, sans transformer le résultat en simple bruit.
+OPERATEURS_WEB_V2_DEFAUT = [
+    '"forum entreprises" université', '"forum entreprises" master',
+    '"forum entreprises" ingénieurs', '"forum entreprises" diplômés',
+    '"rencontre entreprises" université', '"rencontre entreprises" master',
+    '"rencontres entreprises" ingénieurs', '"job dating" cadres',
+    '"job dating" "jeunes diplômés"', '"job dating" "bac+5"',
+    '"forum emploi" université', '"forum emploi" master',
+    '"forum emploi" "grande école"', '"forum emploi" ingénieurs',
+    'recrutement "jeunes diplômés"', 'recrutement cadres université',
+    'recrutement ingénieurs université', 'recrutement master université',
+    '"career day" université', '"career forum" université',
+    'alumni entreprises recrutement', 'alumni carrière entreprises',
+    'doctorat entreprises recrutement', 'doctorants entreprises',
+    'ingénieurs recrutement', '"premier emploi" diplômés',
+    '"objectif premier emploi"', '"relations entreprises" université',
+    '"rencontre employeurs" université', '"forum alternance" master',
+]
+
+DOMAINES_INSTITUTIONNELS_V2_DEFAUT = [
+    "site:apec.fr", "site:francetravail.fr", "site:messervices.francetravail.fr",
+    "site:univ-poitiers.fr", "site:univ-larochelle.fr", "site:unilim.fr",
+    "site:data.gouv.fr",
+]
+
+EXCLUSIONS_WEB_V2_DEFAUT = '-"job étudiant" -"emploi étudiant" -"job saisonnier" -"emploi saisonnier" -"job d’été" -"jobs d’été" -lycée -collège -"post-bac"'
+
+
+def charger_operateurs_web_v2():
+    cfg = load_yaml_optionnel("operators.yml")
+    web = cfg.get("web", {}) if isinstance(cfg, dict) else {}
+    combinaisons = cfg.get("combinaisons", []) if isinstance(cfg, dict) else []
+    domaines = cfg.get("institutional_domains", DOMAINES_INSTITUTIONNELS_V2_DEFAUT) if isinstance(cfg, dict) else DOMAINES_INSTITUTIONNELS_V2_DEFAUT
+    exclusions = cfg.get("exclusions", EXCLUSIONS_WEB_V2_DEFAUT) if isinstance(cfg, dict) else EXCLUSIONS_WEB_V2_DEFAUT
+    ops = []
+    if combinaisons:
+        for paire in combinaisons:
+            if isinstance(paire, (list, tuple)) and len(paire) == 2:
+                ops.append(f'"{paire[0]}" "{paire[1]}"')
+    if not ops:
+        ops = list(OPERATEURS_WEB_V2_DEFAUT)
+    return ops, list(domaines), exclusions
+
+
 def construire_requetes(departements):
     requetes = []
+    operateurs_web, domaines_institutionnels, exclusions_web = charger_operateurs_web_v2()
 
     # Les années antérieures à ANNEE_MIN ne sont plus recherchées.
     annees = sorted(
@@ -650,6 +701,38 @@ def construire_requetes(departements):
                         "mot_cle": mot,
                         "lieu": ville,
                     })
+
+    # Seconde passe opérateurs Web : quelques combinaisons à fort rendement.
+    # On garde une requête par département/année/opérateur et on mélange
+    # ensuite les sources institutionnelles dans un sous-ensemble limité.
+    for code, nom in departements["departements"].items():
+        for annee in annees:
+            for operateur in operateurs_web:
+                requetes.append({
+                    "departement": code,
+                    "nom_departement": nom,
+                    "annee": annee,
+                    "categorie_numero": 2,
+                    "categorie": "Recherche Web V2 / opérateurs",
+                    "mot_cle": operateur,
+                    "complement": exclusions_web,
+                    "operateur_web": "V2",
+                    "famille_operateur": "combinaison",
+                })
+
+            # Passe institutionnelle très ciblée : 4 domaines prioritaires.
+            for domaine in domaines_institutionnels:
+                requetes.append({
+                    "departement": code,
+                    "nom_departement": nom,
+                    "annee": annee,
+                    "categorie_numero": 2,
+                    "categorie": "Source institutionnelle / opérateur",
+                    "mot_cle": f'"forum entreprises" {domaine}',
+                    "complement": str(annee),
+                    "operateur_web": "INSTITUTIONNEL",
+                    "famille_operateur": "source_institutionnelle",
+                })
 
     return requetes
 
@@ -735,41 +818,6 @@ def rechercher_google_news(requete):
 
 
 # ============================================================
-# STATISTIQUES TEMPORELLES DES REQUÊTES
-# ============================================================
-
-STATISTIQUES_REQUETES = []
-
-def _enregistrer_stat_requete(requete, duree, nb_resultats, erreur=""):
-    STATISTIQUES_REQUETES.append({
-        "departement": requete.get("departement", ""),
-        "nom_departement": requete.get("nom_departement", ""),
-        "annee": requete.get("annee", ""),
-        "categorie": requete.get("categorie", ""),
-        "mot_cle": requete.get("mot_cle", ""),
-        "lieu": requete.get("lieu", ""),
-        "duree_secondes": round(duree, 3),
-        "nb_resultats": nb_resultats,
-        "erreur": erreur,
-    })
-
-def afficher_statistiques_temporelles():
-    if not STATISTIQUES_REQUETES:
-        return
-    df = pd.DataFrame(STATISTIQUES_REQUETES)
-    print()
-    print("========================================")
-    print("STATISTIQUES TEMPORELLES DES REQUÊTES")
-    print("========================================")
-    print(f"Requêtes chronométrées : {len(df)}")
-    print(f"Durée moyenne : {df['duree_secondes'].mean():.3f} s")
-    print(f"Durée médiane : {df['duree_secondes'].median():.3f} s")
-    print(f"Plus rapide : {df['duree_secondes'].min():.3f} s")
-    print(f"Plus lente : {df['duree_secondes'].max():.3f} s")
-    print(f"Temps cumulé : {df['duree_secondes'].sum():.1f} s")
-
-
-# ============================================================
 # COLLECTE PARALLÈLE
 # ============================================================
 
@@ -790,16 +838,13 @@ def collecter(requetes):
     print()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {}
-        for requete in requetes:
-            future = executor.submit(rechercher_google_news, requete)
-            futures[future] = (requete, time.perf_counter())
+        futures = {
+            executor.submit(rechercher_google_news, requete): requete
+            for requete in requetes
+        }
 
         for future in as_completed(futures):
             termine += 1
-            requete, debut_requete = futures[future]
-            erreur_requete = ""
-            resultat = None
 
             try:
                 resultat = future.result()
@@ -810,18 +855,9 @@ def collecter(requetes):
                     resultats.extend(resultat["resultats"])
                 else:
                     erreurs += 1
-                    erreur_requete = resultat.get("erreur", "")
 
-            except Exception as e:
+            except Exception:
                 erreurs += 1
-                erreur_requete = f"{type(e).__name__}: {e}"
-
-            _enregistrer_stat_requete(
-                requete,
-                time.perf_counter() - debut_requete,
-                len(resultat.get("resultats", [])) if isinstance(resultat, dict) else 0,
-                erreur_requete,
-            )
 
             if termine % 20 == 0 or termine == total:
                 print(
@@ -838,7 +874,6 @@ def collecter(requetes):
         "Requêtes ayant retourné au moins un résultat : "
         f"{requetes_avec_resultats}/{total}"
     )
-    afficher_statistiques_temporelles()
 
     return resultats, erreurs
 
@@ -1816,194 +1851,6 @@ def appliquer_ia(pertinents, a_verifier):
 
 
 # ============================================================
-# DELTA / JOURNAL QUOTIDIEN
-# ============================================================
-
-DELTA_COLUMNS = [
-    "TYPE_MOUVEMENT", "cle_evenement", "titre", "url", "source",
-    "organisateur_page", "departement", "nom_departement", "date_ia",
-    "annee_detectee", "statut", "statut_final", "decision_ia",
-    "confiance_ia", "score", "raison", "raison_ia", "categorie_ia",
-    "page_enrichie", "date_collecte",
-]
-
-
-def _cle_evenement_delta(resultat):
-    """Clé stable pour comparer deux exécutions sans dépendre du titre."""
-    url = str(resultat.get("url_finale") or resultat.get("url_reelle") or resultat.get("url") or "").strip().lower()
-    if url:
-        return hashlib.sha1(url.encode("utf-8")).hexdigest()[:20]
-    base = "|".join([
-        str(resultat.get("titre", "")).strip().lower(),
-        str(resultat.get("departement", "")).strip(),
-        str(resultat.get("date_ia", "")).strip(),
-    ])
-    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:20]
-
-
-def _charger_ancienne_base():
-    """Charge la dernière base connue avant son remplacement par la nouvelle exécution."""
-    fichiers = [
-        DATA / "base_complete.csv",
-        DATA / "resultats_ia.csv",
-        DATA / "a_verifier.csv",
-        DATA / "non_pertinent.csv",
-    ]
-    frames = []
-    vus = set()
-    for chemin in fichiers:
-        if not chemin.exists():
-            continue
-        try:
-            df = pd.read_csv(chemin, dtype=str, keep_default_na=False)
-            if df.empty:
-                continue
-            for _, row in df.iterrows():
-                rec = row.to_dict()
-                cle = _cle_evenement_delta(rec)
-                if cle in vus:
-                    continue
-                vus.add(cle)
-                frames.append(rec)
-        except Exception as e:
-            print(f"⚠️ Ancienne base ignorée ({chemin.name}) : {type(e).__name__}")
-    return frames
-
-
-def _normaliser_delta_record(resultat):
-    rec = dict(resultat)
-    rec["cle_evenement"] = _cle_evenement_delta(rec)
-    return rec
-
-
-def generer_delta(ancienne_base, nouvelle_base):
-    """Construit le journal de mouvements de l'exécution courante."""
-    anciens = {_cle_evenement_delta(x): x for x in ancienne_base}
-    nouveaux = {_cle_evenement_delta(x): x for x in nouvelle_base}
-
-    lignes = []
-    champs_suivis = [
-        "titre", "url", "url_finale", "source", "organisateur_page",
-        "departement", "date_ia", "annee_detectee", "statut_final",
-        "decision_ia", "confiance_ia", "score", "raison", "raison_ia",
-    ]
-
-    for cle, actuel in nouveaux.items():
-        if cle not in anciens:
-            statut_nouveau = str(actuel.get("statut_final") or actuel.get("statut") or "")
-            decision_nouveau = str(actuel.get("decision_ia") or "")
-            # Le bulletin quotidien ne remonte que ce qui est exploitable
-            # ou à contrôler. Les nouveaux NON_PERTINENTS restent dans la base.
-            if statut_nouveau == "Non pertinent" or decision_nouveau == "NON_PERTINENT":
-                continue
-            ligne = _normaliser_delta_record(actuel)
-            ligne["TYPE_MOUVEMENT"] = "NOUVEAU"
-            lignes.append(ligne)
-            continue
-
-        ancien = anciens[cle]
-        modifications = []
-        for champ in champs_suivis:
-            avant = str(ancien.get(champ, ""))
-            apres = str(actuel.get(champ, ""))
-            if avant != apres:
-                modifications.append(champ)
-
-        # Toute nouvelle demande de vérification est conservée dans le delta,
-        # même si le reste de la fiche n'a pas changé.
-        decision_avant = str(ancien.get("decision_ia", ""))
-        decision_apres = str(actuel.get("decision_ia", ""))
-        statut_apres = str(actuel.get("statut_final") or actuel.get("statut") or "")
-
-        if decision_apres == "A_VERIFIER" or statut_apres == "À vérifier":
-            type_mouvement = "A_VERIFIER"
-        elif modifications:
-            type_mouvement = "MODIFIE"
-        else:
-            continue
-
-        ligne = _normaliser_delta_record(actuel)
-        ligne["TYPE_MOUVEMENT"] = type_mouvement
-        ligne["CHAMPS_MODIFIES"] = ", ".join(modifications)
-        ligne["DECISION_AVANT"] = decision_avant
-        ligne["DECISION_APRES"] = decision_apres
-        lignes.append(ligne)
-
-    # Un événement absent de la collecte ne doit pas être présenté comme
-    # « annulé » sans preuve. On le signale seulement comme disparu de la collecte.
-    for cle, ancien in anciens.items():
-        if cle in nouveaux:
-            continue
-        ligne = _normaliser_delta_record(ancien)
-        ligne["TYPE_MOUVEMENT"] = "DISPARU_DE_LA_COLLECTE"
-        lignes.append(ligne)
-
-    df = pd.DataFrame(lignes)
-    if df.empty:
-        for col in DELTA_COLUMNS:
-            df[col] = []
-        return df
-
-    for col in DELTA_COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-    extras = [c for c in ["CHAMPS_MODIFIES", "DECISION_AVANT", "DECISION_APRES"] if c in df.columns]
-    return df[DELTA_COLUMNS + extras]
-
-
-def sauvegarder_delta_et_bulletin(ancienne_base, nouvelle_base, stats_requetes=None):
-    """Sauvegarde le delta CSV et le bulletin Excel quotidien."""
-    DATA.mkdir(exist_ok=True)
-    OUTPUT.mkdir(exist_ok=True)
-
-    delta = generer_delta(ancienne_base, nouvelle_base)
-    date_run = datetime.now().strftime("%Y-%m-%d")
-
-    delta.to_csv(DATA / "delta_apec.csv", index=False, encoding="utf-8-sig")
-
-    synthese = pd.DataFrame([
-        {"indicateur": "Nouveaux", "valeur": int((delta["TYPE_MOUVEMENT"] == "NOUVEAU").sum())},
-        {"indicateur": "À vérifier", "valeur": int((delta["TYPE_MOUVEMENT"] == "A_VERIFIER").sum())},
-        {"indicateur": "Modifiés", "valeur": int((delta["TYPE_MOUVEMENT"] == "MODIFIE").sum())},
-        {"indicateur": "Disparus de la collecte", "valeur": int((delta["TYPE_MOUVEMENT"] == "DISPARU_DE_LA_COLLECTE").sum())},
-        {"indicateur": "Total mouvements", "valeur": len(delta)},
-        {"indicateur": "Base précédente", "valeur": len(ancienne_base)},
-        {"indicateur": "Base actuelle", "valeur": len(nouvelle_base)},
-    ])
-
-    # Les performances de requêtes sont ajoutées si le module de statistiques
-    # est présent dans le script courant.
-    performances = pd.DataFrame(stats_requetes or [])
-    if performances.empty:
-        performances = pd.DataFrame([{"information": "Statistiques détaillées non disponibles dans cette exécution."}])
-
-    bulletin = OUTPUT / f"veille_apec_{date_run}.xlsx"
-    with pd.ExcelWriter(bulletin, engine="openpyxl") as writer:
-        synthese.to_excel(writer, sheet_name="SYNTHÈSE", index=False)
-        for mouvement, feuille in [
-            ("NOUVEAU", "NOUVEAUX"),
-            ("A_VERIFIER", "À VÉRIFIER"),
-            ("MODIFIE", "MODIFIÉS"),
-            ("DISPARU_DE_LA_COLLECTE", "DISPARUS"),
-        ]:
-            sous = delta[delta["TYPE_MOUVEMENT"] == mouvement].copy()
-            sous.to_excel(writer, sheet_name=feuille, index=False)
-        delta.to_excel(writer, sheet_name="HISTORIQUE", index=False)
-        performances.to_excel(writer, sheet_name="PERFORMANCES", index=False)
-
-    print()
-    print("========================================")
-    print("DELTA / NOUVEAU BULLETIN")
-    print("========================================")
-    print(f"Nouveaux : {(delta['TYPE_MOUVEMENT'] == 'NOUVEAU').sum()}")
-    print(f"À vérifier : {(delta['TYPE_MOUVEMENT'] == 'A_VERIFIER').sum()}")
-    print(f"Modifiés : {(delta['TYPE_MOUVEMENT'] == 'MODIFIE').sum()}")
-    print(f"Disparus de la collecte : {(delta['TYPE_MOUVEMENT'] == 'DISPARU_DE_LA_COLLECTE').sum()}")
-    print(f"Bulletin : {bulletin}")
-    return bulletin
-
-
-# ============================================================
 # SAUVEGARDE
 # ============================================================
 
@@ -2183,13 +2030,6 @@ def sauvegarder(
         encoding="utf-8-sig"
     )
 
-    # Base complète conservée pour les comparaisons entre deux exécutions.
-    dataframe(tous).to_csv(
-        DATA / "base_complete.csv",
-        index=False,
-        encoding="utf-8-sig"
-    )
-
     return True
 
 
@@ -2203,9 +2043,6 @@ def main():
 
     DATA.mkdir(exist_ok=True)
     OUTPUT.mkdir(exist_ok=True)
-
-    # Lecture AVANT écrasement des CSV : nécessaire pour produire le delta.
-    ancienne_base = _charger_ancienne_base()
 
     print()
     print("========================================")
@@ -2323,19 +2160,8 @@ def main():
 
     synchronisation_ok = False
 
-    bulletin_delta = None
     if sauvegarde_ok:
         synchronisation_ok = synchroniser_excel()
-
-        nouvelle_base = pertinents + a_verifier + non_pertinents
-        try:
-            bulletin_delta = sauvegarder_delta_et_bulletin(
-                ancienne_base,
-                nouvelle_base,
-                stats_requetes=STATISTIQUES_REQUETES if "STATISTIQUES_REQUETES" in globals() else None,
-            )
-        except Exception as e:
-            print(f"⚠️ Génération du bulletin delta échouée : {type(e).__name__} : {e}")
 
     duree_total = time.time() - debut_total
 
@@ -2352,10 +2178,6 @@ def main():
     print(
         "Synchronisation Excel : "
         f"{'OUI' if synchronisation_ok else 'NON'}"
-    )
-    print(
-        "Bulletin delta : "
-        f"{'OUI' if bulletin_delta else 'NON'}"
     )
 
     print()
