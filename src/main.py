@@ -18,6 +18,7 @@ from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
 from ia import analyser_resultat
+from sources_externes import collecter_sources_externes
 
 
 def synchroniser_excel():
@@ -104,7 +105,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-24-v6"
+VERSION_PROGRAMME = "2026-11-24-v7-sources"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -203,6 +204,19 @@ def sauvegarder_memoire(memoire):
 def load_yaml(filename):
     with open(CONFIG / filename, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def load_yaml_optionnel(filename):
+    """Fichier de configuration facultatif : {} s'il est absent ou illisible."""
+    chemin = CONFIG / filename
+    if not chemin.exists():
+        return {}
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"⚠️ {filename} illisible ({type(e).__name__}) : ignoré.")
+        return {}
 
 
 # ============================================================
@@ -331,15 +345,14 @@ TERMES_EMPLOI = [
     "recrutement",
     "recruteur",
     "recruteurs",
-    "cadre",
-    "demandeurs d’emploi",
+    "demandeurs d'emploi",
+    "dirigeant",
     "candidats",
     "métiers",
     "carrière",
     "alternance",
     "apprentissage",
-    "cadre supérieur"
-    "dirigeant"
+    "cadre",
 ]
 
 TERMES_FORMATION = [
@@ -549,7 +562,13 @@ def detecter_geographie(resultat):
 
     hors_cible = [v for v in VILLES_HORS_CIBLE if v in normaliser(resultat.get("titre", ""))]
 
-    positif = departement_present or bool(villes_presentes)
+    # Source dont le département est connu (université, ville, OpenAgenda) :
+    # la zone est démontrée par la source elle-même.
+    positif = (
+        departement_present
+        or bool(villes_presentes)
+        or resultat.get("geographie_source") == "OUI"
+    )
 
     return positif, departement_present, villes_presentes, hors_cible
 
@@ -1239,6 +1258,14 @@ def calculer_score(resultat):
         score -= 20
         raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
 
+    # Fiabilité de la source : l'organisateur l'emporte sur la presse.
+    niveau_source = int(resultat.get("niveau_source", 0) or 0)
+    if niveau_source in (1, 2):
+        score += 6
+        raisons.append("source officielle")
+    elif niveau_source == 3:
+        score += 2
+
     # Exclusions : une exclusion ne tue pas un événement si un signal Apec
     # très fort est présent, mais elle doit faire fortement baisser le score.
     if exclusions:
@@ -1316,7 +1343,12 @@ def calculer_score(resultat):
 
     # Format détecté uniquement de façon indirecte (ex. « salons & forums ») :
     # la preuve est insuffisante pour conclure sans vérification (IA ou humaine).
-    if statut == "Pertinent" and event_indirect and not (event_emploi or event_superieur):
+    if (
+        statut == "Pertinent"
+        and event_indirect
+        and not (event_emploi or event_superieur)
+        and niveau_source not in (1, 2)   # source officielle : pas de plafond
+    ):
         statut = "À vérifier"
         raisons.append("plafonné à « À vérifier » : format événementiel indirect seulement")
 
@@ -1777,6 +1809,8 @@ def sauvegarder(
         "categorie_numero",
         "categorie",
         "mot_cle",
+        "origine",
+        "niveau_source",
         "score",
         "score_emploi",
         "score_formation",
@@ -1945,6 +1979,36 @@ def main():
     print(f"Requêtes générées : {len(requetes)}")
 
     resultats_bruts, erreurs = collecter(requetes)
+
+    # Sources externes (sites officiels, OpenAgenda, Bing News, flux directs).
+    # En tête de liste : le dédoublonnage garde la première occurrence, donc
+    # la source primaire l'emporte sur l'article de presse.
+    try:
+        # mot de la zone (nom de département ou ville) -> code département
+        zone = {}
+        for code, nom in departements["departements"].items():
+            zone[nom.lower()] = code
+        for code, villes in VILLES_DEPARTEMENTS.items():
+            for ville in villes:
+                zone.setdefault(ville.lower(), code)
+        annees_ext = sorted(
+            {int(a) for a in departements["annees"] if int(a) >= ANNEE_MIN}
+            | {ANNEE_PRIORITAIRE}
+        )
+        externes = collecter_sources_externes(
+            sources_yml=load_yaml_optionnel("sources.yml"),
+            extra=load_yaml_optionnel("sources_collecte.yml"),
+            departements=departements["departements"],
+            annees=annees_ext,
+            session_factory=get_session,
+            timeout=TIMEOUT,
+            zone=zone,
+        )
+    except Exception as e:
+        print(f"⚠️ Sources externes ignorées : {type(e).__name__} : {e}")
+        externes = []
+
+    resultats_bruts = externes + resultats_bruts
 
     print()
     print("========================================")
