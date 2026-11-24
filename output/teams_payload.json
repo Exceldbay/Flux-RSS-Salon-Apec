@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "24/11/2026 15:35",
+            "text": "24/11/2026 16:53",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -73,28 +73,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 20.0s — 2947 résultats, 0 erreurs",
+            "text": "✅ T01 — Collecte RSS · 22.0s — 2963 résultats, 1 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 138.0s — 525 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 133.0s — 525 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 23.0s — 1115 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage · 23.0s — 1135 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 18 pertinents / 102 à vérifier / 995 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 17 pertinents / 101 à vérifier / 1017 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -108,7 +108,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 254.0s — 119 candidats traités",
+            "text": "✅ T01 — Analyse IA · 232.0s — 117 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -181,7 +181,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "forum recrutement — 5 uniques · 0 pertinents · 0 à vérifier",
+            "text": "forum formation — 3 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -200,7 +200,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "IA : 2 appels · 0 mémoire · 55 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
+            "text": "IA : 2 appels · 0 mémoire · 53 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
             "isSubtle": true,
             "wrap": true,
             "spacing": "Medium"
