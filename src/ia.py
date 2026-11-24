@@ -1,13 +1,11 @@
-
 import os
 import json
 from google import genai
 from google.genai import errors as genai_errors
 
-MODEL_PRIMARY = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-MODEL_FALLBACK = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
-# Alias de compatibilite pour le reste du programme.
-MODEL = MODEL_PRIMARY
+MODEL_31 = os.getenv("GEMINI_MODEL_31", "gemini-3.1-flash-lite")
+MODEL_38 = os.getenv("GEMINI_MODEL_38", "gemini-3.8-flash")
+MODEL = MODEL_31
 _DIAGNOSTIC_FAIT = False
 
 
@@ -32,20 +30,12 @@ def diagnostic_gemini():
         }
     try:
         client = genai.Client(api_key=api_key)
-        primary = _diagnostic_modele(client, MODEL_PRIMARY)
-        fallback = _diagnostic_modele(client, MODEL_FALLBACK)
-        return {"ok": primary.get("ok") or fallback.get("ok"), "primary": primary, "fallback": fallback}
+        stage31 = _diagnostic_modele(client, MODEL_31)
+        stage38 = _diagnostic_modele(client, MODEL_38)
+        return {"ok": stage31.get("ok") or stage38.get("ok"), "stage31": stage31, "stage38": stage38}
     except Exception as e:
         err = {"ok": False, "code": 0, "message": f"{type(e).__name__}: {str(e)[:500]}"}
         return {"ok": False, "primary": err, "fallback": err}
-
-
-def _doit_basculer_fallback(code):
-    # Un 429 signifie generalement quota/rate-limit : changer de modele ne
-    # resout pas forcement le probleme et risquerait de multiplier les appels.
-    if code in (401, 429):
-        return False
-    return code in (0, 400, 403, 404, 408, 409, 500, 502, 503, 504)
 
 
 def _appel_modele(client, modele, prompt):
@@ -55,77 +45,30 @@ def _appel_modele(client, modele, prompt):
         texte = texte.replace("```json", "").replace("```", "").strip()
     return json.loads(texte)
 
-def analyser_resultat(resultat):
-    """Analyse finale Apec : cadres, jeunes diplômés et enseignement supérieur qualifié."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return {
-            "decision_ia": "IA_INDISPONIBLE",
-            "confiance_ia": 0,
-            "raison_ia": "Clé GEMINI_API_KEY absente.",
-            "categorie_ia": "",
-            "date_ia": "",
-            "departement_ia": "",
-            "modele_ia": MODEL_PRIMARY,
-            "fallback_ia": "NON",
-            "erreur_modele_primaire": "",
-        }
-
-    global _DIAGNOSTIC_FAIT
-
-    if not _DIAGNOSTIC_FAIT:
-        _DIAGNOSTIC_FAIT = True
-        print("========================================", flush=True)
-        print("TEST GEMINI API", flush=True)
-        print("========================================", flush=True)
-        print(f"Clé GEMINI_API_KEY : présente", flush=True)
-        print(f"Modèle principal : {MODEL_PRIMARY}", flush=True)
-        print(f"Modèle secours   : {MODEL_FALLBACK}", flush=True)
-        diagnostic = diagnostic_gemini()
-        pdiag = diagnostic.get("primary", {})
-        fdiag = diagnostic.get("fallback", {})
-        print(f"✓ {MODEL_PRIMARY} : {pdiag.get('message', 'OK')}" if pdiag.get("ok") else f"✗ {MODEL_PRIMARY} : code {pdiag.get('code', 0)} — {pdiag.get('message', '')}", flush=True)
-        print(f"✓ {MODEL_FALLBACK} : {fdiag.get('message', 'OK')}" if fdiag.get("ok") else f"✗ {MODEL_FALLBACK} : code {fdiag.get('code', 0)} — {fdiag.get('message', '')}", flush=True)
-        if not diagnostic.get("ok"):
-            return {
-                "decision_ia": "IA_INDISPONIBLE",
-                "confiance_ia": 0,
-                "raison_ia": "TEST GEMINI API — aucun des deux modèles n’est accessible.",
-                "categorie_ia": "",
-                "date_ia": "",
-                "departement_ia": "",
-                "modele_ia": "",
-                "fallback_ia": "NON",
-            }
-        print("========================================", flush=True)
-
-    try:
-        client = genai.Client(api_key=api_key)
-
-        champs = {
-            "titre": resultat.get("titre", ""),
-            "description": resultat.get("description", ""),
-            "source": resultat.get("source", ""),
-            "url": resultat.get("url", ""),
-            "date": resultat.get("date_publication", ""),
-            "annee_recherchee": resultat.get("annee_recherchee", ""),
-            "annee_detectee": resultat.get("annee_detectee", ""),
-            "departement": resultat.get("departement", ""),
-            "evenement": resultat.get("evenement_detecte", ""),
-            "geographie": resultat.get("geographie_verifiee", ""),
-            "score": resultat.get("score_cible_apec", resultat.get("score", 0)),
-            "signaux_cible": resultat.get("signaux_cible_apec", ""),
-            "signaux_superieur": resultat.get("signaux_superieur", ""),
-            "signaux_entreprise": resultat.get("signaux_entreprise", ""),
-            "signaux_exclusion": resultat.get("signaux_exclusion", ""),
-            "titre_page": resultat.get("titre_page", ""),
-            "description_page": resultat.get("description_page", ""),
-            "date_page": resultat.get("date_evenement_page", ""),
-            "lieu_page": resultat.get("lieu_page", ""),
-            "organisateur_page": resultat.get("organisateur_page", ""),
-        }
-
-        prompt = f"""
+def _construire_prompt_31(resultat):
+    champs = {
+        "titre": resultat.get("titre", ""),
+        "description": resultat.get("description", ""),
+        "source": resultat.get("source", ""),
+        "url": resultat.get("url", ""),
+        "date": resultat.get("date_publication", ""),
+        "annee_recherchee": resultat.get("annee_recherchee", ""),
+        "annee_detectee": resultat.get("annee_detectee", ""),
+        "departement": resultat.get("departement", ""),
+        "evenement": resultat.get("evenement_detecte", ""),
+        "geographie": resultat.get("geographie_verifiee", ""),
+        "score": resultat.get("score_cible_apec", resultat.get("score", 0)),
+        "signaux_cible": resultat.get("signaux_cible_apec", ""),
+        "signaux_superieur": resultat.get("signaux_superieur", ""),
+        "signaux_entreprise": resultat.get("signaux_entreprise", ""),
+        "signaux_exclusion": resultat.get("signaux_exclusion", ""),
+        "titre_page": resultat.get("titre_page", ""),
+        "description_page": resultat.get("description_page", ""),
+        "date_page": resultat.get("date_evenement_page", ""),
+        "lieu_page": resultat.get("lieu_page", ""),
+        "organisateur_page": resultat.get("organisateur_page", ""),
+    }
+    return f"""
 Tu es l'analyste final d'une veille événementielle Apec.
 
 CIBLE PRIORITAIRE
@@ -241,77 +184,92 @@ Réponds UNIQUEMENT avec ce JSON :
 }}
 """
 
-        modele_utilise = MODEL_PRIMARY
-        fallback_utilise = "NON"
-        erreur_primaire = ""
+def _normaliser_decision(data):
+    decision = data.get("decision", "A_VERIFIER")
+    if decision not in {"PERTINENT", "A_VERIFIER", "NON_PERTINENT"}:
+        decision = "A_VERIFIER"
+    try:
+        confiance = int(data.get("confiance", 0))
+    except (TypeError, ValueError):
+        confiance = 0
+    confiance = max(0, min(100, confiance))
+    return decision, confiance
 
-        try:
-            data = _appel_modele(client, MODEL_PRIMARY, prompt)
-            print(f"→ {MODEL_PRIMARY} : OK", flush=True)
-        except genai_errors.APIError as e_primary:
-            code_primary = getattr(e_primary, "code", 0)
-            msg_primary = getattr(e_primary, "message", str(e_primary))
-            erreur_primaire = f"HTTP {code_primary} : {str(msg_primary)[:300]}"
-            print(f"→ {MODEL_PRIMARY} : ERREUR {code_primary} — {str(msg_primary)[:180]}", flush=True)
-            if not _doit_basculer_fallback(code_primary):
-                raise
-            print(f"→ bascule {MODEL_FALLBACK}", flush=True)
-            data = _appel_modele(client, MODEL_FALLBACK, prompt)
-            modele_utilise = MODEL_FALLBACK
-            fallback_utilise = "OUI"
-            print(f"→ {MODEL_FALLBACK} : OK", flush=True)
-        except Exception as e_primary:
-            erreur_primaire = f"{type(e_primary).__name__} : {str(e_primary)[:300]}"
-            print(f"→ {MODEL_PRIMARY} : ERREUR — {str(e_primary)[:180]}", flush=True)
-            print(f"→ bascule {MODEL_FALLBACK}", flush=True)
-            data = _appel_modele(client, MODEL_FALLBACK, prompt)
-            modele_utilise = MODEL_FALLBACK
-            fallback_utilise = "OUI"
-            print(f"→ {MODEL_FALLBACK} : OK", flush=True)
 
-        decision = data.get("decision", "A_VERIFIER")
-        if decision not in {"PERTINENT", "A_VERIFIER", "NON_PERTINENT"}:
-            decision = "A_VERIFIER"
+def _base_resultat_indisponible(message, modele):
+    return {"decision_ia":"IA_INDISPONIBLE","confiance_ia":0,"raison_ia":message,"categorie_ia":"","date_ia":"","departement_ia":"","modele_ia":modele}
 
-        try:
-            confiance = int(data.get("confiance", 0))
-        except (TypeError, ValueError):
-            confiance = 0
 
-        confiance = max(0, min(100, confiance))
-
-        return {
-            "decision_ia": decision,
-            "confiance_ia": confiance,
-            "raison_ia": data.get("raison", ""),
-            "categorie_ia": data.get("categorie", ""),
-            "date_ia": data.get("date", ""),
-            "departement_ia": data.get("departement", ""),
-            "modele_ia": modele_utilise,
-            "fallback_ia": fallback_utilise,
-            "erreur_modele_primaire": erreur_primaire,
-        }
-
+def analyser_resultat_31(resultat):
+    """Analyse de base : Gemini 3.1 Flash Lite. Aucune limite ici."""
+    api_key=os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return _base_resultat_indisponible("Clé GEMINI_API_KEY absente.", MODEL_31)
+    try:
+        client=genai.Client(api_key=api_key)
+        data=_appel_modele(client, MODEL_31, _construire_prompt_31(resultat))
+        decision, confiance=_normaliser_decision(data)
+        return {"decision_ia":decision,"confiance_ia":confiance,"raison_ia":data.get("raison",""),"categorie_ia":data.get("categorie",""),"date_ia":data.get("date",""),"departement_ia":data.get("departement",""),"modele_ia":MODEL_31,"modele_ia_1":MODEL_31,"decision_ia_1":decision,"confiance_ia_1":confiance,"raison_ia_1":data.get("raison","")}
     except genai_errors.APIError as e:
-        code = getattr(e, "code", "?")
-        message = getattr(e, "message", str(e))
-        return {
-            "decision_ia": "IA_INDISPONIBLE",
-            "confiance_ia": 0,
-            "raison_ia": f"Gemini API HTTP {code} ({type(e).__name__}) : {str(message)[:500]}",
-            "categorie_ia": "",
-            "date_ia": "",
-            "departement_ia": "",
-            "modele_ia": MODEL_PRIMARY,
-            "fallback_ia": "NON",
-            "erreur_modele_primaire": "",
-        }
+        return _base_resultat_indisponible(f"Gemini 3.1 HTTP {getattr(e,'code','?')} : {str(getattr(e,'message',str(e)))[:500]}", MODEL_31)
     except Exception as e:
-        return {
-            "decision_ia": "IA_INDISPONIBLE",
-            "confiance_ia": 0,
-            "raison_ia": f"Erreur IA : {type(e).__name__} : {str(e)[:500]}",
-            "categorie_ia": "",
-            "date_ia": "",
-            "departement_ia": "",
-        }
+        return _base_resultat_indisponible(f"Erreur Gemini 3.1 : {type(e).__name__} : {str(e)[:500]}", MODEL_31)
+
+
+def _prompt_38(resultat, analyse31):
+    return f"""Tu es le second niveau d'analyse d'une veille événementielle Apec.
+
+Tu dois RÉ-ENRICHIR l'analyse Gemini 3.1 ci-dessous, pas la remplacer mécaniquement. Vérifie les éléments disponibles et apporte uniquement des précisions justifiées. Ne rien inventer.
+
+ANALYSE GEMINI 3.1
+Décision : {analyse31.get('decision_ia_1', analyse31.get('decision_ia',''))}
+Confiance : {analyse31.get('confiance_ia_1', analyse31.get('confiance_ia',0))}
+Raison : {analyse31.get('raison_ia_1', analyse31.get('raison_ia',''))}
+
+DONNÉES ÉVÉNEMENT
+Titre : {resultat.get('titre','')}
+Description : {resultat.get('description','')}
+Source : {resultat.get('source','')}
+URL : {resultat.get('url','')}
+Département : {resultat.get('departement','')}
+Année : {resultat.get('annee_detectee', resultat.get('annee_recherchee',''))}
+Score Python : {resultat.get('score_cible_apec', resultat.get('score',0))}
+Signaux cible : {resultat.get('signaux_cible_apec','')}
+Signaux supérieur : {resultat.get('signaux_superieur','')}
+Signaux entreprises : {resultat.get('signaux_entreprise','')}
+Page : {resultat.get('titre_page','')} | {resultat.get('description_page','')}
+Date événement : {resultat.get('date_evenement_page','')}
+Lieu : {resultat.get('lieu_page','')}
+Organisateur : {resultat.get('organisateur_page','')}
+
+OBJECTIF
+Renforce l'analyse sur : public visé, niveau de qualification, relation entreprises/recrutement, intérêt cadres/jeunes diplômés, importance Apec et priorité 2027.
+
+Retourne UNIQUEMENT ce JSON :
+{{
+  "decision": "PERTINENT|A_VERIFIER|NON_PERTINENT",
+  "confiance": 0,
+  "raison": "raison finale enrichie et factuelle",
+  "enrichissement": "ce que le 3.8 apporte par rapport au 3.1",
+  "priorite_38": "TRES_FORTE|FORTE|MOYENNE"
+}}"""
+
+
+def analyser_resultat_38(resultat, analyse31):
+    """Ré-enrichissement des meilleurs candidats par Gemini 3.8 Flash."""
+    api_key=os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {"modele_ia_2":MODEL_38,"decision_ia_2":"IA_INDISPONIBLE","confiance_ia_2":0,"raison_ia_2":"Clé GEMINI_API_KEY absente.","enrichissement_38":""}
+    try:
+        client=genai.Client(api_key=api_key)
+        data=_appel_modele(client, MODEL_38, _prompt_38(resultat, analyse31))
+        decision, confiance=_normaliser_decision(data)
+        return {"modele_ia_2":MODEL_38,"decision_ia_2":decision,"confiance_ia_2":confiance,"raison_ia_2":data.get("raison",""),"enrichissement_38":data.get("enrichissement",""),"priorite_38":data.get("priorite_38","")}
+    except genai_errors.APIError as e:
+        return {"modele_ia_2":MODEL_38,"decision_ia_2":"IA_INDISPONIBLE","confiance_ia_2":0,"raison_ia_2":f"Gemini 3.8 HTTP {getattr(e,'code','?')} : {str(getattr(e,'message',str(e)))[:500]}","enrichissement_38":""}
+    except Exception as e:
+        return {"modele_ia_2":MODEL_38,"decision_ia_2":"IA_INDISPONIBLE","confiance_ia_2":0,"raison_ia_2":f"Erreur Gemini 3.8 : {type(e).__name__} : {str(e)[:500]}","enrichissement_38":""}
+
+
+def analyser_resultat(resultat):
+    return analyser_resultat_31(resultat)
