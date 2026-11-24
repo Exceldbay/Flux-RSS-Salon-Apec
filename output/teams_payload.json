@@ -1,0 +1,212 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.2",
+        "body": [
+          {
+            "type": "TextBlock",
+            "text": "🔎 Veille APEC — synthèse quotidienne",
+            "weight": "Bolder",
+            "size": "Large",
+            "wrap": true
+          },
+          {
+            "type": "TextBlock",
+            "text": "24/11/2026 14:52",
+            "isSubtle": true,
+            "spacing": "None"
+          },
+          {
+            "type": "FactSet",
+            "facts": [
+              {
+                "title": "Nouveaux pertinents",
+                "value": "0"
+              },
+              {
+                "title": "Promus pertinents",
+                "value": "0"
+              },
+              {
+                "title": "Nouveaux 2027 à vérifier",
+                "value": "0"
+              },
+              {
+                "title": "Évolutions utiles",
+                "value": "0"
+              },
+              {
+                "title": "Pertinents actuels",
+                "value": "0"
+              },
+              {
+                "title": "À vérifier actuels",
+                "value": "0"
+              },
+              {
+                "title": "Tâches terminées",
+                "value": "8/12"
+              },
+              {
+                "title": "Erreurs tâches",
+                "value": "0"
+              }
+            ]
+          },
+          {
+            "type": "TextBlock",
+            "text": "Aucun nouveau signal suffisamment utile depuis la dernière veille.",
+            "wrap": true,
+            "spacing": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Suivi détaillé des tâches",
+            "weight": "Bolder",
+            "spacing": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Collecte RSS · 22.0s — 3180 résultats, 1 erreurs",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Collecte sources externes · 148.0s — 513 résultats externes",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Dédoublonnage · 34.0s — 1246 résultats conservés après traitement",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Scoring / qualification — 16 pertinents / 102 à vérifier / 1128 non pertinents",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "⏳ T01 — Enrichissement pages",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Analyse IA · 251.0s — 117 candidats traités",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Delta / historique — 0 évolutions détectées",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Statistiques opérateurs — 48 opérateurs mesurés",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "✅ T01 — Sauvegarde CSV — CSV principaux + audits enregistrés",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "⏳ T01 — Synchronisation Excel",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "🔄 T01 — Préparation Teams",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "⏳ T01 — Envoi Teams",
+            "wrap": true,
+            "spacing": "None",
+            "size": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Opérateurs les plus utiles",
+            "weight": "Bolder",
+            "spacing": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "source:site_officiel — 78 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "source:openagenda — 426 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "alumni — 6 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "salon recrutement — 1 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Suivi d'exécution : ✅ Toutes les tâches sont terminées · 8/12 terminées",
+            "wrap": true,
+            "spacing": "Medium",
+            "weight": "Bolder"
+          },
+          {
+            "type": "TextBlock",
+            "text": "IA : 2 appels · 0 mémoire · 51 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
+            "isSubtle": true,
+            "wrap": true,
+            "spacing": "Medium"
+          }
+        ]
+      }
+    }
+  ]
+}
