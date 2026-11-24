@@ -20,7 +20,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
-from ia import analyser_resultat
+from ia import analyser_resultat_31, analyser_resultat_38
 from sources_externes import collecter_sources_externes
 from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
@@ -77,8 +77,9 @@ OUTPUT = ROOT / "output"
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
-MAX_IA_ANALYSES = int(os.getenv("MAX_GEMINI_ANALYSES", "50"))
-COOLDOWN_IA_SECONDS = int(os.getenv("GEMINI_COOLDOWN_SECONDS", "15"))
+COOLDOWN_31_SECONDS = int(os.getenv("GEMINI_31_COOLDOWN_SECONDS", "15"))
+COOLDOWN_38_SECONDS = int(os.getenv("GEMINI_38_COOLDOWN_SECONDS", "60"))
+MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "5"))
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 
@@ -1100,10 +1101,10 @@ def enrichir_candidats_ia(candidats):
     print("========================================")
     print("ENRICHISSEMENT DES PAGES")
     print("========================================")
-    print(f"Candidats à enrichir : {min(len(candidats), MAX_IA_ANALYSES)}")
+    print(f"Candidats à enrichir : {len(candidats)}")
 
     debut = time.time()
-    cible = candidats[:MAX_IA_ANALYSES]
+    cible = candidats
     decoder_liens_google(cible)
 
     with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
@@ -1747,13 +1748,10 @@ def classer_statut_final(resultat, decision):
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier):
-    """Analyse Gemini uniquement les candidats ayant passé le premier filtre Python."""
-
+    """Cascade IA : tous les candidats passent par 3.1, top 5 ré-enrichis par 3.8."""
     tous_candidats = pertinents + a_verifier
 
-    # Premier test Python : Gemini ne voit que les candidats ayant atteint
-    # le seuil défini par SEUIL_GEMINI. Les signaux indirects ne forcent plus
-    # un appel IA : ils doivent d'abord passer ce premier filtre.
+    # Premier filtre Python : seuls les candidats >= seuil sont soumis à Gemini.
     candidats = []
     non_eligibles = []
     for candidat in tous_candidats:
@@ -1763,252 +1761,175 @@ def appliquer_ia(pertinents, a_verifier):
         else:
             candidat["decision_ia"] = "IA_NON_REQUISE"
             candidat["confiance_ia"] = 0
-            candidat["raison_ia"] = (
-                f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}."
-            )
+            candidat["raison_ia"] = f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}."
             candidat["ia_analyse"] = "NON"
             candidat["statut_final"] = candidat.get("statut", "À vérifier")
             non_eligibles.append(candidat)
 
-    # Les plus pertinents passent en premier.
-    candidats.sort(
-        key=lambda x: (
-            str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
-            x.get("score", 0),
-        ),
-        reverse=True,
-    )
+    candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
+    enrichir_candidats_ia(candidats)
+    for candidat in candidats:
+        try:
+            candidat.update(calculer_score(candidat))
+        except Exception:
+            pass
 
-    # Protection quota : même si 100+ candidats passent le premier filtre,
-    # seuls les N meilleurs sont envoyés à Gemini sur cette exécution.
-    candidats = candidats[:MAX_IA_ANALYSES]
-    limite_non_analyse = []
-    for candidat in (pertinents + a_verifier):
-        if candidat in non_eligibles or candidat in candidats:
-            continue
-        candidat["decision_ia"] = "IA_NON_ANALYSE"
-        candidat["confiance_ia"] = 0
-        candidat["raison_ia"] = (
-            f"Candidat éligible Gemini mais hors quota local : top {MAX_IA_ANALYSES} uniquement."
-        )
-        candidat["ia_analyse"] = "NON"
-        candidat["statut_final"] = candidat.get("statut", "À vérifier")
-        limite_non_analyse.append(candidat)
-
-    memoire = charger_memoire()
-    en_memoire = {
-        id(c) for c in candidats
-        if memoire_valide(memoire.get(cle_memoire(c)))
-    }
-    nouveaux = [c for c in candidats if id(c) not in en_memoire]
-    enrichir_candidats_ia(nouveaux)
-
-    # L'enrichissement apporte date/lieu/organisateur et permet un second
-    # calcul avant l'appel Gemini, sans élargir la sélection initiale.
-    for candidat in nouveaux:
-        score_data = calculer_score(candidat)
-        candidat.update(score_data)
-
-    analyses = 0
     ia_resultats = []
     nouveaux_pertinents = []
     nouveaux_a_verifier = []
     quota_bloque = False
     erreurs_consecutives = 0
-    dernier_appel = 0.0
-    motif_arret = ""
 
     print()
     print("========================================")
-    print("COUCHE IA GEMINI")
+    print("COUCHE IA GEMINI — CASCADE 3.1 → 3.8")
     print("========================================")
     print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
-    print(f"Candidats ayant passé le filtre : {len(pertinents) + len(a_verifier) - len(non_eligibles)}")
-    print(f"Candidats envoyés à Gemini : {len(candidats)}")
-    print(f"Non éligibles Gemini : {len(non_eligibles)}")
-    print(f"Éligibles mais hors top {MAX_IA_ANALYSES} : {len(limite_non_analyse)}")
-    print(f"Déjà en mémoire (réutilisés sans appel) : {len(en_memoire)}")
-    print(f"Nouveaux appels prévus : {len(nouveaux)}")
-    print(f"Modèle Gemini : {os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')}")
-    print(f"Cooldown : {COOLDOWN_IA_SECONDS} s")
-    total_prevu = len(nouveaux)
-    print(
-        f"Durée maximale théorique de la partie cooldown : "
-        f"{max(0, total_prevu - 1) * COOLDOWN_IA_SECONDS / 60:.1f} min"
-    )
+    print(f"Candidats ayant passé le filtre : {len(candidats)}")
+    print("Gemini 3.1 Flash Lite : TOUS les candidats | cooldown 15 s")
+    print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} | ré-enrichissement | cooldown 60 s")
     print(flush=True)
 
-    for resultat in candidats:
-        statut_python = str(resultat.get("statut", "À vérifier"))
-        cle = cle_memoire(resultat)
-        depuis_memoire = id(resultat) in en_memoire
+    dernier_appel_31 = 0.0
 
-        if not depuis_memoire and analyses >= MAX_IA_ANALYSES:
-            resultat["decision_ia"] = "IA_NON_ANALYSE"
-            resultat["confiance_ia"] = 0
-            resultat["raison_ia"] = "Limite maximale d'analyses IA atteinte."
-            resultat["categorie_ia"] = ""
-            resultat["date_ia"] = ""
-            resultat["departement_ia"] = ""
-            resultat["ia_analyse"] = "NON"
-            resultat["statut_final"] = statut_python
-            ia_resultats.append(resultat)
-            if statut_python == "Pertinent":
-                nouveaux_pertinents.append(resultat)
-            else:
-                nouveaux_a_verifier.append(resultat)
-            continue
+    # ========================================================
+    # ÉTAPE 1 — TOUS les candidats -> Gemini 3.1 Flash Lite
+    # ========================================================
+    for position, resultat in enumerate(candidats, 1):
+        if dernier_appel_31:
+            attente = COOLDOWN_31_SECONDS - (time.time() - dernier_appel_31)
+            if attente > 0:
+                time.sleep(attente)
 
-        if not depuis_memoire and quota_bloque:
-            resultat["decision_ia"] = "IA_NON_ANALYSE"
-            resultat["confiance_ia"] = 0
-            resultat["raison_ia"] = (
-                f"Non analysé : appels IA arrêtés ({motif_arret}). "
-                "Candidat conservé pour vérification."
-            )
-            resultat["categorie_ia"] = ""
-            resultat["date_ia"] = ""
-            resultat["departement_ia"] = ""
-            resultat["ia_analyse"] = "NON"
-            resultat["statut_final"] = statut_python
-            ia_resultats.append(resultat)
-            if statut_python == "Pertinent":
-                nouveaux_pertinents.append(resultat)
-            else:
-                nouveaux_a_verifier.append(resultat)
-            continue
-
-        if depuis_memoire:
-            entree = memoire[cle]
-            analyse = {
-                "decision_ia": entree.get("decision_ia", ""),
-                "confiance_ia": int(float(entree.get("confiance_ia") or 0)),
-                "raison_ia": entree.get("raison_ia", ""),
-                "categorie_ia": entree.get("categorie_ia", ""),
-                "date_ia": entree.get("date_ia", ""),
-                "departement_ia": entree.get("departement_ia", ""),
-                "erreur_ia_type": "",
-            }
-        else:
-            if dernier_appel:
-                attente = COOLDOWN_IA_SECONDS - (time.time() - dernier_appel)
-                if attente > 0:
-                    time.sleep(attente)
-
-            position = analyses + 1
-            print(
-                f"[IA] {position}/{total_prevu} — "
-                f"score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}",
-                flush=True,
-            )
-            analyse = analyser_resultat(resultat)
-            dernier_appel = time.time()
-            analyses += 1
-
-            if analyse.get("decision_ia") in MEMOIRE_VALIDITE_JOURS:
-                memoire[cle] = {
-                    "cle": cle,
-                    "url": resultat.get("url", ""),
-                    "titre": resultat.get("titre", ""),
-                    "decision_ia": analyse.get("decision_ia", ""),
-                    "confiance_ia": analyse.get("confiance_ia", 0),
-                    "raison_ia": analyse.get("raison_ia", ""),
-                    "categorie_ia": analyse.get("categorie_ia", ""),
-                    "date_ia": analyse.get("date_ia", ""),
-                    "departement_ia": analyse.get("departement_ia", ""),
-                    "page_lue": resultat.get("page_enrichie", "NON"),
-                    "date_analyse": datetime.now().isoformat(timespec="seconds"),
-                    "version_regles": REGLES_VERSION,
-                }
+        print(f"[IA 3.1] {position}/{len(candidats)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
+        analyse = analyser_resultat_31(resultat)
+        dernier_appel_31 = time.time()
 
         resultat.update(analyse)
-        resultat["ia_analyse"] = "MEMOIRE" if depuis_memoire else "OUI"
+        resultat["ia_analyse"] = "OUI"
+        resultat["modele_ia_1"] = "gemini-3.1-flash-lite"
+        resultat["decision_ia_1"] = analyse.get("decision_ia", "IA_INDISPONIBLE")
+        resultat["confiance_ia_1"] = analyse.get("confiance_ia", 0)
+        resultat["raison_ia_1"] = analyse.get("raison_ia", "")
+        resultat["escalade_38"] = "NON"
+
         decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
         resultat["date_ia"] = normaliser_date_ia(resultat.get("date_ia", ""))
 
-        type_erreur = str(analyse.get("erreur_ia_type", ""))
-        if not depuis_memoire:
-            if decision == "IA_INDISPONIBLE":
-                erreurs_consecutives += 1
-            else:
-                erreurs_consecutives = 0
+        dept_python = str(resultat.get("departement", "")).strip()
+        dept_ia = str(resultat.get("departement_ia", "")).strip()
+        if dept_python and dept_ia and dept_ia != dept_python:
+            resultat["raison_ia"] = (str(resultat.get("raison_ia", "")) + " | Conflit de département avec Python : vérification requise.").strip(" |")
+            resultat["decision_ia"] = "A_VERIFIER"
+            decision = "A_VERIFIER"
+        if dept_ia and dept_ia not in {"16", "17", "19", "23", "79", "86", "87"}:
+            resultat["decision_ia"] = "A_VERIFIER"
+            decision = "A_VERIFIER"
 
-        quota_detecte = False
-        if type_erreur in {"QUOTA_JOUR", "QUOTA_MINUTE", "CLE_ABSENTE"}:
-            quota_detecte = True
-            motif_arret = {
-                "QUOTA_JOUR": "quota quotidien Gemini atteint",
-                "QUOTA_MINUTE": "quota par minute persistant",
-                "CLE_ABSENTE": "clé GEMINI_API_KEY absente",
-            }[type_erreur]
-        elif erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
-            quota_detecte = True
-            motif_arret = f"{erreurs_consecutives} erreurs Gemini consécutives"
+        if decision == "IA_INDISPONIBLE":
+            erreurs_consecutives += 1
+        else:
+            erreurs_consecutives = 0
 
-        icone = {
-            "PERTINENT": "🟢",
-            "A_VERIFIER": "🟠",
-            "NON_PERTINENT": "🔴",
-            "IA_INDISPONIBLE": "⚠️",
-        }.get(decision, "•")
-        detail = f"{resultat.get('confiance_ia', 0)}%" if decision != "IA_INDISPONIBLE" else (type_erreur or "erreur")
-        etiquette = "MÉMOIRE" if depuis_memoire else f"IA {analyses}/{total_prevu}"
-        print(
-            f"[{etiquette}] {icone} {decision} ({detail}) | dép. "
-            f"{resultat.get('departement', '?')} | score {resultat.get('score', 0)} | "
-            f"{court(resultat.get('titre', ''))}",
-            flush=True,
-        )
-
-        if quota_detecte:
+        if erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
             quota_bloque = True
-            print(f"⛔ Arrêt des appels IA : {motif_arret}", flush=True)
-            resultat["statut_final"] = statut_python
-            ia_resultats.append(resultat)
-            if statut_python == "Pertinent":
-                nouveaux_pertinents.append(resultat)
-            else:
-                nouveaux_a_verifier.append(resultat)
-            continue
+            print(f"⛔ Arrêt 3.1 après {erreurs_consecutives} erreurs consécutives", flush=True)
+            # Les candidats restants restent non analysés, mais le système ne lance pas 3.8.
+            for restant in candidats[position:]:
+                restant["decision_ia"] = "IA_NON_ANALYSE"
+                restant["confiance_ia"] = 0
+                restant["raison_ia"] = "Analyse 3.1 interrompue après erreurs Gemini consécutives."
+                restant["ia_analyse"] = "NON"
+                restant["statut_final"] = restant.get("statut", "À vérifier")
+                ia_resultats.append(restant)
+            break
 
         classer_statut_final(resultat, decision)
-        if decision == "PERTINENT":
-            nouveaux_pertinents.append(resultat)
-        elif decision == "NON_PERTINENT":
-            pass
-        else:
-            nouveaux_a_verifier.append(resultat)
         ia_resultats.append(resultat)
 
-    sauvegarder_memoire(memoire)
+    # ========================================================
+    # ÉTAPE 2 — TOP candidats -> Gemini 3.8 pour ré-enrichissement
+    # ========================================================
+    candidats_38 = [
+        r for r in ia_resultats
+        if r.get("decision_ia_1") in {"PERTINENT", "A_VERIFIER"}
+        and r.get("ia_analyse") == "OUI"
+    ]
 
-    # Réintégration : les candidats hors IA restent disponibles dans la sortie
-    # et conservent leur classement Python initial.
-    hors_ia = non_eligibles + limite_non_analyse
-    ia_resultats.extend(hors_ia)
-    for resultat in hors_ia:
-        if resultat.get("statut") == "Pertinent":
-            nouveaux_pertinents.append(resultat)
-        else:
-            nouveaux_a_verifier.append(resultat)
+    def score_importance_38(r):
+        decision = r.get("decision_ia_1", "")
+        rang = {"PERTINENT": 3, "A_VERIFIER": 2}.get(decision, 0)
+        confiance = int(r.get("confiance_ia_1", 0) or 0)
+        score_python = int(r.get("score", 0) or 0)
+        priorite = str(r.get("priorite_2027", "")).upper()
+        bonus = 20 if "FORTE" in priorite else (10 if "MOYENNE" in priorite else 0)
+        direct = 10 if r.get("score_cible_apec", 0) >= 20 else 0
+        return (rang, confiance, score_python + bonus + direct)
+
+    candidats_38.sort(key=score_importance_38, reverse=True)
+    top_38 = candidats_38[:MAX_IA_38]
 
     print()
-    non_traites = sum(1 for x in ia_resultats if x.get("decision_ia") == "IA_NON_ANALYSE")
-    print(f"Analyses IA effectuées : {analyses}")
-    print(f"Candidats non analysés (conservés) : {non_traites}")
-    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}" + (f" ({motif_arret})" if quota_bloque else ""))
+    print("========================================")
+    print("RÉ-ENRICHISSEMENT GEMINI 3.8")
+    print("========================================")
+    print(f"Candidats 3.1 disponibles : {len(candidats_38)}")
+    print(f"Top 3.8 sélectionné : {len(top_38)}/{MAX_IA_38}")
+    print(flush=True)
+
+    dernier_appel_38 = 0.0
+    for position, resultat in enumerate(top_38, 1):
+        if dernier_appel_38:
+            attente = COOLDOWN_38_SECONDS - (time.time() - dernier_appel_38)
+            if attente > 0:
+                print(f"[IA 3.8] cooldown : {attente:.0f}s", flush=True)
+                time.sleep(attente)
+
+        print(f"[IA 3.8] {position}/{len(top_38)} — ré-enrichissement — {court(resultat.get('titre', ''))}", flush=True)
+        analyse38 = analyser_resultat_38(resultat, resultat)
+        dernier_appel_38 = time.time()
+        resultat.update(analyse38)
+        resultat["escalade_38"] = "OUI"
+        resultat["motif_escalade_38"] = "Top candidat après analyse Gemini 3.1"
+
+        if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE":
+            resultat["decision_ia"] = analyse38.get("decision_ia_2", resultat.get("decision_ia_1", "A_VERIFIER"))
+            resultat["confiance_ia"] = analyse38.get("confiance_ia_2", resultat.get("confiance_ia_1", 0))
+            resultat["raison_ia"] = (
+                str(resultat.get("raison_ia_1", ""))
+                + " | ENRICHISSEMENT 3.8 : "
+                + str(analyse38.get("raison_ia_2", ""))
+            ).strip(" |")
+            resultat["modele_ia"] = "gemini-3.1-flash-lite + gemini-3.8-flash"
+            classer_statut_final(resultat, resultat["decision_ia"])
+        else:
+            resultat["modele_ia"] = "gemini-3.1-flash-lite"
+            resultat["raison_ia"] = str(resultat.get("raison_ia_1", "")) + " | 3.8 indisponible, analyse 3.1 conservée."
+
+    # Réintégration des candidats non éligibles Python et des candidats restants.
+    for resultat in non_eligibles:
+        ia_resultats.append(resultat)
+
+    nouveaux_pertinents = [r for r in ia_resultats if r.get("decision_ia") == "PERTINENT"]
+    nouveaux_a_verifier = [r for r in ia_resultats if r.get("decision_ia") == "A_VERIFIER"]
+    nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
+    nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    print()
+    print(f"Analyses Gemini 3.1 effectuées : {sum(1 for r in ia_resultats if r.get('modele_ia_1') == 'gemini-3.1-flash-lite')}")
+    print(f"Ré-enrichissements Gemini 3.8 effectués : {sum(1 for r in ia_resultats if r.get('escalade_38') == 'OUI')}/{MAX_IA_38}")
+    print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
     print(
-        "Décisions IA : "
+        "Décisions finales : "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'NON_PERTINENT')} non pertinent / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_REQUIS' or x.get('decision_ia') == 'IA_NON_REQUISE')} non requis / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_REQUISE')} non requis / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_ANALYSE')} non analysé"
     )
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
-
 
 # ============================================================
 # SUIVI PRÉCIS DES TÂCHES
@@ -2275,10 +2196,10 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_
         "taches_erreurs": resume_taches["erreurs"],
     }
     meta.update({
-        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "gemini_model": "gemini-3.1-flash-lite → gemini-3.8-flash",
         "gemini_score_min": GEMINI_SCORE_MIN,
-        "gemini_max_analyses": MAX_IA_ANALYSES,
-        "gemini_cooldown": COOLDOWN_IA_SECONDS,
+        "gemini_max_analyses": "3.1 illimité / 3.8 max 5",
+        "gemini_cooldown": "3.1: 15 s / 3.8: 60 s",
     })
     card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
@@ -2492,7 +2413,7 @@ def main():
     print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
     print(
         f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
-        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | cooldown : {COOLDOWN_IA_SECONDS} s | max analyses : {MAX_IA_ANALYSES}"
+        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/15s | 3.8: max {MAX_IA_38}/60s"
     )
 
     initialiser_suivi_taches()
