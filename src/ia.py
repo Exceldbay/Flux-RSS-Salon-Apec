@@ -1,25 +1,59 @@
+
 import os
 import json
 from google import genai
 from google.genai import errors as genai_errors
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+MODEL_PRIMARY = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+MODEL_FALLBACK = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
+# Alias de compatibilite pour le reste du programme.
+MODEL = MODEL_PRIMARY
 _DIAGNOSTIC_FAIT = False
 
 
-def diagnostic_gemini():
-    """Teste l’accès au modèle sans consommer une analyse métier."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        return {"ok": False, "code": 0, "message": "GEMINI_API_KEY absente."}
+def _diagnostic_modele(client, modele):
     try:
-        client = genai.Client(api_key=api_key)
-        modele = client.models.get(model=MODEL)
-        return {"ok": True, "code": 200, "message": f"Modèle accessible : {getattr(modele, 'name', MODEL)}"}
+        obj = client.models.get(model=modele)
+        return {"ok": True, "code": 200, "message": f"Modèle accessible : {getattr(obj, "name", modele)}"}
     except genai_errors.APIError as e:
         return {"ok": False, "code": getattr(e, "code", 0), "message": getattr(e, "message", str(e))[:500]}
     except Exception as e:
         return {"ok": False, "code": 0, "message": f"{type(e).__name__}: {str(e)[:500]}"}
+
+
+def diagnostic_gemini():
+    """Teste l'accessibilite des deux modeles sans lancer de generation metier."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {
+            "ok": False,
+            "primary": {"ok": False, "code": 0, "message": "GEMINI_API_KEY absente."},
+            "fallback": {"ok": False, "code": 0, "message": "GEMINI_API_KEY absente."},
+        }
+    try:
+        client = genai.Client(api_key=api_key)
+        primary = _diagnostic_modele(client, MODEL_PRIMARY)
+        fallback = _diagnostic_modele(client, MODEL_FALLBACK)
+        return {"ok": primary.get("ok") or fallback.get("ok"), "primary": primary, "fallback": fallback}
+    except Exception as e:
+        err = {"ok": False, "code": 0, "message": f"{type(e).__name__}: {str(e)[:500]}"}
+        return {"ok": False, "primary": err, "fallback": err}
+
+
+def _doit_basculer_fallback(code):
+    # Un 429 signifie generalement quota/rate-limit : changer de modele ne
+    # resout pas forcement le probleme et risquerait de multiplier les appels.
+    if code in (401, 429):
+        return False
+    return code in (0, 400, 403, 404, 408, 409, 500, 502, 503, 504)
+
+
+def _appel_modele(client, modele, prompt):
+    response = client.models.generate_content(model=modele, contents=prompt)
+    texte = (response.text or "").strip()
+    if texte.startswith("```"):
+        texte = texte.replace("```json", "").replace("```", "").strip()
+    return json.loads(texte)
 
 def analyser_resultat(resultat):
     """Analyse finale Apec : cadres, jeunes diplômés et enseignement supérieur qualifié."""
@@ -32,6 +66,9 @@ def analyser_resultat(resultat):
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
+            "modele_ia": MODEL_PRIMARY,
+            "fallback_ia": "NON",
+            "erreur_modele_primaire": "",
         }
 
     global _DIAGNOSTIC_FAIT
@@ -42,19 +79,23 @@ def analyser_resultat(resultat):
         print("TEST GEMINI API", flush=True)
         print("========================================", flush=True)
         print(f"Clé GEMINI_API_KEY : présente", flush=True)
-        print(f"Modèle configuré : {MODEL}", flush=True)
+        print(f"Modèle principal : {MODEL_PRIMARY}", flush=True)
+        print(f"Modèle secours   : {MODEL_FALLBACK}", flush=True)
         diagnostic = diagnostic_gemini()
-        if diagnostic.get("ok"):
-            print(f"✓ Connexion Gemini : OK — {diagnostic.get('message', '')}", flush=True)
-        else:
-            print(f"✗ Connexion Gemini : ÉCHEC — code {diagnostic.get('code', 0)} — {diagnostic.get('message', '')}", flush=True)
+        pdiag = diagnostic.get("primary", {})
+        fdiag = diagnostic.get("fallback", {})
+        print(f"✓ {MODEL_PRIMARY} : {pdiag.get('message', 'OK')}" if pdiag.get("ok") else f"✗ {MODEL_PRIMARY} : code {pdiag.get('code', 0)} — {pdiag.get('message', '')}", flush=True)
+        print(f"✓ {MODEL_FALLBACK} : {fdiag.get('message', 'OK')}" if fdiag.get("ok") else f"✗ {MODEL_FALLBACK} : code {fdiag.get('code', 0)} — {fdiag.get('message', '')}", flush=True)
+        if not diagnostic.get("ok"):
             return {
                 "decision_ia": "IA_INDISPONIBLE",
                 "confiance_ia": 0,
-                "raison_ia": f"TEST GEMINI API — code {diagnostic.get('code', 0)} : {diagnostic.get('message', '')}",
+                "raison_ia": "TEST GEMINI API — aucun des deux modèles n’est accessible.",
                 "categorie_ia": "",
                 "date_ia": "",
                 "departement_ia": "",
+                "modele_ia": "",
+                "fallback_ia": "NON",
             }
         print("========================================", flush=True)
 
@@ -200,16 +241,33 @@ Réponds UNIQUEMENT avec ce JSON :
 }}
 """
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt,
-        )
+        modele_utilise = MODEL_PRIMARY
+        fallback_utilise = "NON"
+        erreur_primaire = ""
 
-        texte = (response.text or "").strip()
-        if texte.startswith("```"):
-            texte = texte.replace("```json", "").replace("```", "").strip()
-
-        data = json.loads(texte)
+        try:
+            data = _appel_modele(client, MODEL_PRIMARY, prompt)
+            print(f"→ {MODEL_PRIMARY} : OK", flush=True)
+        except genai_errors.APIError as e_primary:
+            code_primary = getattr(e_primary, "code", 0)
+            msg_primary = getattr(e_primary, "message", str(e_primary))
+            erreur_primaire = f"HTTP {code_primary} : {str(msg_primary)[:300]}"
+            print(f"→ {MODEL_PRIMARY} : ERREUR {code_primary} — {str(msg_primary)[:180]}", flush=True)
+            if not _doit_basculer_fallback(code_primary):
+                raise
+            print(f"→ bascule {MODEL_FALLBACK}", flush=True)
+            data = _appel_modele(client, MODEL_FALLBACK, prompt)
+            modele_utilise = MODEL_FALLBACK
+            fallback_utilise = "OUI"
+            print(f"→ {MODEL_FALLBACK} : OK", flush=True)
+        except Exception as e_primary:
+            erreur_primaire = f"{type(e_primary).__name__} : {str(e_primary)[:300]}"
+            print(f"→ {MODEL_PRIMARY} : ERREUR — {str(e_primary)[:180]}", flush=True)
+            print(f"→ bascule {MODEL_FALLBACK}", flush=True)
+            data = _appel_modele(client, MODEL_FALLBACK, prompt)
+            modele_utilise = MODEL_FALLBACK
+            fallback_utilise = "OUI"
+            print(f"→ {MODEL_FALLBACK} : OK", flush=True)
 
         decision = data.get("decision", "A_VERIFIER")
         if decision not in {"PERTINENT", "A_VERIFIER", "NON_PERTINENT"}:
@@ -229,6 +287,9 @@ Réponds UNIQUEMENT avec ce JSON :
             "categorie_ia": data.get("categorie", ""),
             "date_ia": data.get("date", ""),
             "departement_ia": data.get("departement", ""),
+            "modele_ia": modele_utilise,
+            "fallback_ia": fallback_utilise,
+            "erreur_modele_primaire": erreur_primaire,
         }
 
     except genai_errors.APIError as e:
@@ -241,6 +302,9 @@ Réponds UNIQUEMENT avec ce JSON :
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
+            "modele_ia": MODEL_PRIMARY,
+            "fallback_ia": "NON",
+            "erreur_modele_primaire": "",
         }
     except Exception as e:
         return {
