@@ -4,6 +4,7 @@ from google import genai
 from google.genai import errors as genai_errors
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+_DIAGNOSTIC_FAIT = False
 
 
 def diagnostic_gemini():
@@ -32,6 +33,30 @@ def analyser_resultat(resultat):
             "date_ia": "",
             "departement_ia": "",
         }
+
+    global _DIAGNOSTIC_FAIT
+
+    if not _DIAGNOSTIC_FAIT:
+        _DIAGNOSTIC_FAIT = True
+        print("========================================", flush=True)
+        print("TEST GEMINI API", flush=True)
+        print("========================================", flush=True)
+        print(f"Clé GEMINI_API_KEY : présente", flush=True)
+        print(f"Modèle configuré : {MODEL}", flush=True)
+        diagnostic = diagnostic_gemini()
+        if diagnostic.get("ok"):
+            print(f"✓ Connexion Gemini : OK — {diagnostic.get('message', '')}", flush=True)
+        else:
+            print(f"✗ Connexion Gemini : ÉCHEC — code {diagnostic.get('code', 0)} — {diagnostic.get('message', '')}", flush=True)
+            return {
+                "decision_ia": "IA_INDISPONIBLE",
+                "confiance_ia": 0,
+                "raison_ia": f"TEST GEMINI API — code {diagnostic.get('code', 0)} : {diagnostic.get('message', '')}",
+                "categorie_ia": "",
+                "date_ia": "",
+                "departement_ia": "",
+            }
+        print("========================================", flush=True)
 
     try:
         client = genai.Client(api_key=api_key)
