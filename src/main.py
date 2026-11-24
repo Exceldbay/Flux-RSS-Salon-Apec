@@ -331,13 +331,15 @@ TERMES_EMPLOI = [
     "recrutement",
     "recruteur",
     "recruteurs",
-    "demandeurs d'emploi",
+    "cadre",
     "demandeurs d’emploi",
     "candidats",
     "métiers",
     "carrière",
     "alternance",
     "apprentissage",
+    "cadre supérieur"
+    "dirigeant"
 ]
 
 TERMES_FORMATION = [
