@@ -7,6 +7,8 @@ import hashlib
 import threading
 import time
 import re
+import json
+import difflib
 import subprocess
 import sys
 
@@ -83,6 +85,13 @@ ANNEE_PRIORITAIRE = 2027  # recherchée plus largement et mise en avant
 BONUS_2027 = 12
 SEUIL_VERIF_2027 = 6      # seuil « À vérifier » assoupli pour 2027 (10 sinon)
 MALUS_HORS_PERIODE = 40
+
+# V9 : filtres / priorisation
+SEUIL_IA_MIN = 8                 # en dessous : pas d'appel Gemini
+SEUIL_IA_MAX = 30                # au-dessus : décision Python souvent suffisante
+SEUIL_AUTO_PERTINENT = 32        # score local suffisamment fort
+SEUIL_SOURCE_OFFICIELLE = 1
+SIMILARITE_TITRE_DEDOUBLONNAGE = 0.94
 # Un article publié avant cette date, sans année 2026+ dans le texte, est
 # considéré comme portant sur une édition 2025 ou antérieure. Les articles de
 # décembre 2025 restent candidats : ils peuvent annoncer un événement 2026.
@@ -105,11 +114,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-24-v8-operateurs-web"
+VERSION_PROGRAMME = "2026-11-24-v9-precision"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-24"
+REGLES_VERSION = "2026-11-24-v9"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -789,6 +798,7 @@ def rechercher_google_news(requete):
                     "titre": titre,
                     "url": lien,
                     "source": source,
+                    "sources_trouvees": source,
                     "description": normaliser(description),
                     "date_publication": date_publication,
                     "departement": requete["departement"],
@@ -994,8 +1004,7 @@ def enrichir_page(resultat):
         )
         date_evenement = extraire_meta(
             soup,
-            ["event:start_time", "event:start_date", "startDate",
-             "date", "datePublished"]
+            ["event:start_time", "event:start_date", "startDate"]
         )
         lieu_page = extraire_meta(
             soup, ["event:location", "location", "place"]
@@ -1017,9 +1026,7 @@ def enrichir_page(resultat):
 
                     if not date_evenement:
                         date_evenement = str(
-                            element.get("startDate")
-                            or element.get("datePublished")
-                            or ""
+                            element.get("startDate") or ""
                         ).strip()
 
                     if not lieu_page:
@@ -1126,32 +1133,109 @@ def enrichir_candidats_ia(candidats):
 # DÉDOUBLONNAGE
 # ============================================================
 
+def canoniser_url(url):
+    """Retire les paramètres de tracking pour fiabiliser le dédoublonnage."""
+    valeur = str(url or "").strip()
+    if not valeur:
+        return ""
+    valeur = re.sub(r"[?#].*$", "", valeur)
+    valeur = valeur.rstrip("/")
+    return valeur.lower()
+
+
+def cle_titre_evenement(titre):
+    """Titre simplifié pour comparer des événements issus de plusieurs sources."""
+    t = normaliser(titre)
+    t = re.sub(r"[^a-z0-9àâäéèêëîïôöùûüç ]", " ", t)
+    mots = [
+        "le", "la", "les", "un", "une", "des", "de", "du", "et", "en",
+        "à", "a", "pour", "sur", "édition", "edition", "2026", "2027", "2028",
+    ]
+    return " ".join(m for m in t.split() if m not in mots)
+
+
+def fusionner_resultats(principal, doublon):
+    """Conserve la source primaire et complète les champs manquants."""
+    for cle, valeur in doublon.items():
+        if not principal.get(cle) and valeur:
+            principal[cle] = valeur
+    sources = [x for x in [
+        principal.get("source", ""), doublon.get("source", "")
+    ] if x]
+    principal["sources_trouvees"] = " | ".join(dict.fromkeys(sources))
+    return principal
+
+
 def dedoublonner(resultats):
-    urls = set()
-    titres = set()
+    """
+    V9.5 : dédoublonnage par URL canonique + rapprochement de titres.
+    Les résultats externes arrivent en premier dans main(), donc la source
+    primaire reste prioritaire lorsqu'elle existe.
+    """
+    par_url = {}
     uniques = []
+    titres = []
 
     for resultat in resultats:
-        url = normaliser(resultat.get("url", ""))
-        titre = normaliser(resultat.get("titre", ""))
-
-        titre_cle = re.sub(
-            r"[^a-z0-9àâäéèêëîïôöùûüç ]",
-            "",
-            titre
-        )
-
+        url = canoniser_url(resultat.get("url_finale") or resultat.get("url"))
+        titre = cle_titre_evenement(resultat.get("titre_page") or resultat.get("titre"))
         if not url:
             continue
 
-        if url in urls or titre_cle in titres:
+        if url in par_url:
+            fusionner_resultats(par_url[url], resultat)
             continue
 
-        urls.add(url)
-        titres.add(titre_cle)
-        uniques.append(resultat)
+        doublon_index = None
+        code = str(resultat.get("departement", ""))
+        annee = str(resultat.get("annee_recherchee", ""))
+
+        # Comparaison prudente : même département + même année + titre très proche.
+        if titre:
+            for idx, (ancien_titre, ancien_code, ancienne_annee) in enumerate(titres):
+                if code != ancien_code or annee != ancienne_annee:
+                    continue
+                if len(titre) < 18 or len(ancien_titre) < 18:
+                    continue
+                ratio = difflib.SequenceMatcher(None, titre, ancien_titre).ratio()
+                if ratio >= SIMILARITE_TITRE_DEDOUBLONNAGE:
+                    doublon_index = idx
+                    break
+
+        if doublon_index is not None:
+            principal = uniques[doublon_index]
+            fusionner_resultats(principal, resultat)
+            par_url[url] = principal
+        else:
+            par_url[url] = resultat
+            uniques.append(resultat)
+            titres.append((titre, code, annee))
 
     return uniques
+
+
+def classer_fiabilite_source(resultat):
+    """V9.6 : attribue un niveau de fiabilité à partir de l'URL et du nom source."""
+    texte = normaliser(
+        " ".join(str(resultat.get(k, "")) for k in
+                 ("url_finale", "url_reelle", "url", "source", "organisateur_page"))
+    )
+    if any(domaine in texte for domaine in DOMAINES_SOURCE_OFFICIELLE):
+        return 1
+    noms_officiels = [
+        "apec", "france travail", "université de poitiers",
+        "la rochelle université", "université de limoges",
+    ]
+    if any(nom in texte for nom in noms_officiels):
+        return 1
+    if any(domaine in texte for domaine in DOMAINES_SOURCE_INSTITUTIONNELLE):
+        return 2
+    if resultat.get("niveau_source"):
+        try:
+            return int(resultat.get("niveau_source"))
+        except Exception:
+            pass
+    return 3 if resultat.get("source") else 4
 
 
 # ============================================================
@@ -1249,19 +1333,66 @@ EVENTS_INDIRECTS = [
 
 EVENT_SIGNAL_CIBLE = EVENTS_EMPLOI + EVENTS_SUPERIEUR + EVENTS_INDIRECTS
 
+# V9.1 : signaux qui prouvent davantage qu'une page décrit un événement
+# réel, plutôt qu'une simple actualité ou une page institutionnelle générale.
+EVENT_PREUVE_FORTE = [
+    "inscription", "inscrivez-vous", "inscrivez vous", "programme",
+    "date et lieu", "date :", "lieu :", "entrée libre", "gratuit",
+    "réservation", "billetterie", "save the date", "rendez-vous",
+    "se tiendra", "aura lieu", "a lieu le", "le 15", "le 16", "le 17",
+    "le 18", "le 19", "le 20", "le 21", "le 22", "le 23", "le 24",
+    "le 25", "le 26", "le 27", "le 28", "le 29", "le 30", "le 31",
+]
+
+EVENT_MOTS_STRUCTURELS = [
+    "forum", "salon", "job dating", "career day", "career fair",
+    "rencontre", "journée", "atelier", "conférence", "table ronde",
+    "portes ouvertes", "webinaire", "matinale", "semaine",
+]
+
+# V9.6 : classement des sources. Les domaines officiels sont prioritaires.
+DOMAINES_SOURCE_OFFICIELLE = [
+    "apec.fr", "francetravail.fr", "univ-poitiers.fr",
+    "univ-larochelle.fr", "unilim.fr", "data.gouv.fr",
+    "poitiers.fr", "larochelle.fr", "limoges.fr",
+]
+
+DOMAINES_SOURCE_INSTITUTIONNELLE = [
+    "enseignementsup-recherche.gouv.fr", "education.gouv.fr",
+    "nouvelle-aquitaine.fr", "grandpoitiers.fr", "agglo-larochelle.fr",
+    "grandangouleme.fr", "grand-chatellerault.fr", "niortagglo.fr",
+    "limoges-metropole.fr", "openagenda.com",
+]
+
+
+
+def parser_date_evenement(valeur):
+    """Extrait une date ISO/FR simple depuis les métadonnées de page."""
+    t = str(valeur or "").strip()
+    m = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", t)
+    if m:
+        try:
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+    m = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](202\d)\b", t)
+    if m:
+        try:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            return None
+    return None
+
 
 def calculer_score(resultat):
-    """Score de pertinence Apec indépendant des opérateurs de recherche.
-
-    Les opérateurs continuent à produire le même volume de recherche. Cette
-    couche décide ensuite si le résultat est réellement exploitable par Apec.
-    """
-    titre = normaliser(resultat.get("titre", ""))
-    description = normaliser(resultat.get("description", ""))
+    """V9 : scoring Apec centré sur événement réel + cible + période + source."""
+    titre = normaliser(resultat.get("titre_page") or resultat.get("titre", ""))
+    description = normaliser(resultat.get("description_page") or resultat.get("description", ""))
     source = normaliser(resultat.get("source", ""))
     page = normaliser(
         " ".join(str(resultat.get(k, "")) for k in (
-        "titre_page", "description_page", "lieu_page", "organisateur_page"
+            "titre_page", "description_page", "extrait_page",
+            "lieu_page", "organisateur_page", "date_evenement_page"
         ))
     )
     texte = f"{titre} {description} {page}"
@@ -1277,56 +1408,86 @@ def calculer_score(resultat):
     event_emploi = _signaux(texte, EVENTS_EMPLOI)
     event_superieur = _signaux(texte, EVENTS_SUPERIEUR)
     event_indirect = _signaux(texte, EVENTS_INDIRECTS)
+    preuve_event = _signaux(texte, EVENT_PREUVE_FORTE)
+    structure_event = _signaux(texte, EVENT_MOTS_STRUCTURELS)
 
     geo_ok, dept_present, villes_presentes, hors_geo = detecter_geographie(resultat)
+    date_evenement = parser_date_evenement(resultat.get("date_evenement_page", ""))
     annees = extraire_annees(texte)
+
+    # V9.1 : un événement doit être identifiable, pas seulement suggéré par
+    # « emploi », « master », « université », etc.
+    event_dans_titre = bool(_signaux(titre, EVENT_SIGNAL_CIBLE))
+    event_meta = bool(date_evenement or resultat.get("lieu_page") or resultat.get("organisateur_page"))
+    evenement = bool(
+        (event_emploi or event_superieur or event_indirect)
+        and (event_dans_titre or preuve_event or event_meta or structure_event)
+    )
+
+    # Une page officielle contenant un intitulé événementiel reste acceptable
+    # même si elle ne contient pas les mots « inscription » ou « programme ».
+    niveau_source = classer_fiabilite_source(resultat)
+    if not evenement and niveau_source in (1, 2) and event_dans_titre:
+        evenement = True
 
     score = 0
     raisons = []
 
-    # Nature événementielle : nécessaire mais volontairement peu pondérée.
-    evenement = bool(event_emploi or event_superieur or event_indirect)
     if evenement:
-        score += 6
-        raisons.append("format événementiel identifié")
-        if event_indirect and not (event_emploi or event_superieur):
-            raisons.append("format indirect: " + ", ".join(event_indirect[:3]))
+        score += 10
+        raisons.append("vrai événement identifié")
+        if preuve_event:
+            score += 4
+            raisons.append("preuve événementielle")
+        if date_evenement:
+            score += 4
+            raisons.append("date événement détectée")
+        if resultat.get("lieu_page"):
+            score += 2
+            raisons.append("lieu détecté")
     else:
-        score -= 12
-        raisons.append("événement non clairement identifiable")
+        score -= 18
+        raisons.append("page sans événement suffisamment démontré")
 
-    # Cible directe Apec.
+    # Cible Apec.
     if direct:
         score += min(24, 8 * len(direct))
         raisons.append("cible Apec directe: " + ", ".join(direct[:4]))
 
-    # Jeunes diplômés / enseignement supérieur qualifié.
     if qualifie:
-        score += min(18, 4 * len(qualifie))
-        raisons.append("profil qualifié/supérieur: " + ", ".join(qualifie[:5]))
+        score += min(16, 4 * len(qualifie))
+        raisons.append("profil qualifié: " + ", ".join(qualifie[:5]))
 
     if superieur:
-        score += min(12, 4 * len(superieur))
+        score += min(10, 3 * len(superieur))
         raisons.append("enseignement supérieur: " + ", ".join(superieur[:4]))
 
-    # Relation employeurs / recrutement.
     if entreprise:
         score += min(16, 4 * len(entreprise))
         raisons.append("relation entreprises/recrutement: " + ", ".join(entreprise[:5]))
 
-    # Bonus spécifique aux sources institutionnelles/partenaires utiles.
-    source_bonus_terms = [
-        "apec", "université", "iut", "cesi", "nqt", "france travail",
-        "transitions pro", "grandangoulême", "limoges métropole",
-    ]
-    source_bonus = [x for x in source_bonus_terms if x in source]
-    if source_bonus:
-        score += min(10, 5 * len(source_bonus))
-        raisons.append("source qualifiante: " + ", ".join(source_bonus[:3]))
+    # Relation particulièrement intéressante pour Apec.
+    if superieur and entreprise:
+        score += 8
+        raisons.append("supérieur + entreprises")
 
-    # Catégorie issue des opérateurs : bonus faible, jamais décisionnaire.
+    # Source.
+    if niveau_source == 1:
+        score += 10
+        raisons.append("source officielle prioritaire")
+    elif niveau_source == 2:
+        score += 7
+        raisons.append("source institutionnelle")
+    elif niveau_source == 3:
+        score += 2
+        raisons.append("source secondaire")
+    else:
+        score -= 2
+        raisons.append("source faible/non qualifiée")
+
+    # Catégorie de recherche : bonus faible.
     if categorie == 1 and superieur:
-        score += 4
+        score += 3
     if categorie == 2 and (event_emploi or entreprise):
         score += 3
 
@@ -1335,24 +1496,15 @@ def calculer_score(resultat):
         score += 5
         raisons.append("géographie cible vérifiée")
     else:
-        score -= 10
+        score -= 12
         raisons.append("géographie cible non démontrée")
     if hors_geo:
-        score -= 20
+        score -= 25
         raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
 
-    # Fiabilité de la source : l'organisateur l'emporte sur la presse.
-    niveau_source = int(resultat.get("niveau_source", 0) or 0)
-    if niveau_source in (1, 2):
-        score += 6
-        raisons.append("source officielle")
-    elif niveau_source == 3:
-        score += 2
-
-    # Exclusions : une exclusion ne tue pas un événement si un signal Apec
-    # très fort est présent, mais elle doit faire fortement baisser le score.
+    # Exclusions fortes.
     if exclusions:
-        malus = min(30, 10 * len(exclusions))
+        malus = min(35, 12 * len(exclusions))
         score -= malus
         raisons.append("hors cible probable: " + ", ".join(exclusions[:5]))
 
@@ -1360,121 +1512,129 @@ def calculer_score(resultat):
         score -= 20
         raisons.append("contenu éditorial/actualité")
 
-    # Cohérence année.
+    # Année recherchée.
     if annee and annee in annees:
         score += 3
         raisons.append(f"année {annee} détectée")
 
-    # 2027 : information prioritaire et fortement valorisée.
-    if str(ANNEE_PRIORITAIRE) in annees:
+    est_2027 = str(ANNEE_PRIORITAIRE) in annees
+    if est_2027:
         score += BONUS_2027
-        raisons.append(f"année {ANNEE_PRIORITAIRE} (prioritaire)")
+        raisons.append("2027 prioritaire")
     elif "2028" in annees:
         score += 6
-        raisons.append("année future 2028")
+        raisons.append("2028 future")
     elif "2026" in annees:
         score += 2
 
-    # 2025 et antérieur : retiré. Une année actuelle/future dans le texte
-    # (ex. une édition 2027 qui rappelle 2024) garde le résultat.
+    # Date d'événement passée : beaucoup plus fiable qu'une simple année
+    # trouvée dans le texte.
+    evenement_passe = bool(date_evenement and date_evenement.date() < datetime.now().date())
+    if evenement_passe:
+        score -= MALUS_HORS_PERIODE
+        raisons.append(f"événement passé : {date_evenement:%d/%m/%Y}")
+
+    # Anciennes éditions dans une page sans année actuelle/future.
     annees_passees = extraire_annees_passees(texte)
     date_pub = date_publication_dt(resultat.get("date_publication", ""))
-    hors_periode = (not annees) and (
-        bool(annees_passees)
-        or (date_pub is not None and date_pub < DATE_PUBLICATION_MIN)
+    hors_periode = (
+        not annees
+        and not date_evenement
+        and (
+            bool(annees_passees)
+            or (date_pub is not None and date_pub < DATE_PUBLICATION_MIN)
+        )
     )
     if hors_periode:
         score -= MALUS_HORS_PERIODE
-        origine = (
-            ", ".join(annees_passees[:3])
-            if annees_passees
-            else f"publication {date_pub:%d/%m/%Y}"
-        )
-        raisons.append(f"hors période (≤ {ANNEE_MIN - 1}) : {origine}")
+        origine = ", ".join(annees_passees[:3]) if annees_passees else f"publication {date_pub:%d/%m/%Y}"
+        raisons.append(f"hors période : {origine}")
 
-    # Présélection volontairement permissive : les cas ambigus sont envoyés
-    # à Gemini plutôt que rejetés trop tôt.
+    # Contexte Apec, sans laisser « université » seul décider.
     signaux_contexte = contient_terme(texte, CONTEXTE_APEC)
-    if superieur and entreprise:
-        score += 8
-        raisons.append("enseignement supérieur + relation entreprises")
     if signaux_contexte:
-        score += min(8, 2 * len(signaux_contexte))
-        raisons.append("contexte Apec: " + ", ".join(signaux_contexte[:4]))
+        score += min(6, 2 * len(signaux_contexte))
+        raisons.append("contexte qualifié: " + ", ".join(signaux_contexte[:4]))
+
+    # V9.7 : priorité 2027.
+    if est_2027 and evenement:
+        priorite_2027 = "FORTE" if date_evenement or preuve_event else "MOYENNE"
+    elif "2027" in annees:
+        priorite_2027 = "MOYENNE"
+    else:
+        priorite_2027 = "FAIBLE"
 
     exclusion_forte = bool(exclusions)
-    est_2027 = str(ANNEE_PRIORITAIRE) in annees
-    seuil_verif = SEUIL_VERIF_2027 if est_2027 else 10
-    seuil_verif_hors_cadre = 12 if est_2027 else 18
 
-    if hors_periode:
+    if hors_periode or evenement_passe:
         statut = "Non pertinent"
     elif not evenement or not geo_ok or hors_geo:
-        statut = (
-            "À vérifier"
-            if score >= seuil_verif_hors_cadre and not exclusion_forte
-            else "Non pertinent"
-        )
-    elif exclusion_forte and score < 30:
+        # Filet de sécurité : un cas incomplet reste À vérifier si le score
+        # est suffisamment haut, au lieu d'être silencieusement supprimé.
+        statut = "À vérifier" if score >= 8 and not exclusion_forte else "Non pertinent"
+    elif exclusion_forte and score < 32:
         statut = "Non pertinent"
-    elif score >= 24:
+    elif score >= SEUIL_AUTO_PERTINENT:
         statut = "Pertinent"
-    elif score >= seuil_verif:
+    elif score >= 8:
         statut = "À vérifier"
     else:
         statut = "Non pertinent"
 
-    # Format détecté uniquement de façon indirecte (ex. « salons & forums ») :
-    # la preuve est insuffisante pour conclure sans vérification (IA ou humaine).
+    # Un format indirect sans source fiable ne devient jamais « Pertinent »
+    # uniquement à cause du score.
     if (
         statut == "Pertinent"
         and event_indirect
         and not (event_emploi or event_superieur)
-        and niveau_source not in (1, 2)   # source officielle : pas de plafond
+        and niveau_source not in (1, 2)
     ):
         statut = "À vérifier"
-        raisons.append("plafonné à « À vérifier » : format événementiel indirect seulement")
+        raisons.append("format indirect : vérification nécessaire")
 
     raison = {
-        "Pertinent": "Cible Apec clairement démontrée",
-        "À vérifier": "Signal Apec réel mais preuve ou ciblage à confirmer",
-        "Non pertinent": "Cible Apec insuffisante ou événement hors périmètre",
+        "Pertinent": "Cible Apec + événement + période suffisamment démontrés",
+        "À vérifier": "Signal utile mais preuve ou ciblage à confirmer",
+        "Non pertinent": "Événement/cible/période hors périmètre",
     }[statut]
 
-    details = " | ".join(raisons)
     return {
         "score": score,
         "score_cible_apec": score,
-        "score_emploi": 6 if event_emploi else 0,
+        "score_emploi": 10 if event_emploi else 0,
         "score_formation": 3 if _signaux(texte, TERMES_FORMATION) else 0,
-        "score_superieur": min(12, 4 * len(superieur)),
+        "score_superieur": min(10, 3 * len(superieur)),
         "score_apec": min(24, 8 * len(direct)),
         "score_entreprise": min(16, 4 * len(entreprise)),
-        "score_qualifie": min(18, 4 * len(qualifie)),
-        "score_geographie": 5 if geo_ok else -10,
-        "score_date": 3 if annee and annee in annees else 0,
+        "score_qualifie": min(16, 4 * len(qualifie)),
+        "score_geographie": 5 if geo_ok else -12,
+        "score_date": 4 if date_evenement else 0,
         "score_bruit": -20 if editorial else 0,
+        "score_complementaire": 0,
+        "bonus_titre": 4 if event_dans_titre else 0,
         "signaux_cible_apec": ", ".join(direct),
         "signaux_superieur": ", ".join(superieur + qualifie[:5]),
         "signaux_entreprise": ", ".join(entreprise),
         "signaux_exclusion": ", ".join(exclusions),
         "statut": statut,
         "raison": raison,
-        "motif": "Hors période (2025 et antérieur)" if hors_periode else "",
-        "hors_periode": "OUI" if hors_periode else "NON",
+        "motif": "Événement passé" if evenement_passe else "",
+        "hors_periode": "OUI" if hors_periode or evenement_passe else "NON",
         "periode": (
-            "Hors période (≤2025)" if hors_periode
-            else "2027 (prioritaire)" if est_2027
+            "2027 (prioritaire)" if est_2027
             else "2028" if "2028" in annees
             else "2026" if "2026" in annees
             else "Année non détectée"
         ),
-        "details_score": details,
+        "details_score": " | ".join(raisons),
         "evenement_detecte": "OUI" if evenement else "NON",
+        "preuve_evenement": "OUI" if preuve_event or event_dans_titre else "NON",
         "geographie_verifiee": "OUI" if geo_ok else "NON",
         "annee_detectee": ", ".join(annees),
         "hors_perimetre": ", ".join(exclusions),
         "hors_geographie": ", ".join(hors_geo),
+        "niveau_source_v9": niveau_source,
+        "priorite_2027": priorite_2027,
     }
 
 
@@ -1583,8 +1743,29 @@ def classer_statut_final(resultat, decision):
 def appliquer_ia(pertinents, a_verifier):
     """Analyse les candidats avec Gemini sans perdre les décisions Python."""
 
-    candidats = pertinents + a_verifier
-    # Les candidats 2027 passent en premier (quota Gemini limité).
+    tous_candidats = pertinents + a_verifier
+
+    # V9.4 : Gemini est réservé aux cas ambigus. Les scores locaux très forts
+    # restent autonomes, ce qui réduit fortement la consommation de quota.
+    candidats = []
+    non_necessaires = []
+    for candidat in tous_candidats:
+        score = int(candidat.get("score", 0) or 0)
+        indirect = "OUI" if candidat.get("preuve_evenement") == "NON" else "NON"
+        if (
+            SEUIL_IA_MIN <= score <= SEUIL_IA_MAX
+            or candidat.get("statut") == "À vérifier"
+            or indirect == "OUI"
+        ):
+            candidats.append(candidat)
+        else:
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 100 if candidat.get("statut") == "Pertinent" else 0
+            candidat["raison_ia"] = "Décision locale suffisamment robuste : appel Gemini non nécessaire."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = candidat.get("statut", "À vérifier")
+            non_necessaires.append(candidat)
+
     candidats.sort(
         key=lambda x: (
             str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
@@ -1593,8 +1774,6 @@ def appliquer_ia(pertinents, a_verifier):
         reverse=True,
     )
 
-    # Mémoire : les candidats déjà analysés récemment ne repassent pas par
-    # Gemini ni par l'enrichissement (économie de quota et de requêtes HTTP).
     memoire = charger_memoire()
     en_memoire = {
         id(c) for c in candidats
@@ -1602,6 +1781,12 @@ def appliquer_ia(pertinents, a_verifier):
     }
     nouveaux = [c for c in candidats if id(c) not in en_memoire]
     enrichir_candidats_ia(nouveaux)
+
+    # L'enrichissement apporte date/lieu/organisateur et permet donc un
+    # second calcul plus précis avant l'appel Gemini.
+    for candidat in nouveaux:
+        score_data = calculer_score(candidat)
+        candidat.update(score_data)
 
     analyses = 0
     ia_resultats = []
@@ -1616,7 +1801,8 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print("COUCHE IA GEMINI")
     print("========================================")
-    print(f"Candidats : {len(candidats)}")
+    print(f"Candidats à potentiel IA : {len(candidats)}")
+    print(f"IA non nécessaire : {len(non_necessaires)}")
     print(f"Déjà en mémoire (décision réutilisée, sans appel IA) : {len(en_memoire)}")
     print(f"À analyser : {len(nouveaux)}")
     print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
@@ -1827,7 +2013,20 @@ def appliquer_ia(pertinents, a_verifier):
 
         ia_resultats.append(resultat)
 
-    nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
+    # Réintégration des candidats dont l'IA n'était pas nécessaire.
+    ia_resultats.extend(non_necessaires)
+    nouveaux_pertinents.extend(
+        x for x in non_necessaires if x.get("statut_final") == "Pertinent"
+    )
+    nouveaux_a_verifier.extend(
+        x for x in non_necessaires if x.get("statut_final") == "À vérifier"
+    )
+
+    nouveaux_pertinents.sort(
+        key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
+                       x.get("confiance_ia", 0), x.get("score", 0)),
+        reverse=True
+    )
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     sauvegarder_memoire(memoire)
@@ -1874,6 +2073,7 @@ def sauvegarder(
         "titre",
         "url",
         "source",
+        "sources_trouvees",
         "description",
         "url_finale",
         "url_reelle",
@@ -1916,6 +2116,9 @@ def sauvegarder(
         "motif",
         "details_score",
         "evenement_detecte",
+        "preuve_evenement",
+        "niveau_source_v9",
+        "priorite_2027",
         "geographie_verifiee",
         "annee_detectee",
         "periode",
