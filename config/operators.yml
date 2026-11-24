@@ -1,31 +1,195 @@
-intitle:
-
-  - '"Salon étudiant"'
-  - '"Salon enseignement supérieur"'
-  - '"Salon professionnel"'
-  - '"Salon commercial"'
-  - '"Salon d’orientation"'
-  - '"Foire-exposition"'
-  - '"Exposition de l’enseignement supérieur"'
-  - '"Conférence emploi"'
-  - '"Conférence recrutement"'
-  - '"Table ronde emploi"'
-  - '"Table ronde recrutement"'
-  - '"Forum emploi"'
-  - '"Forum formation"'
-  - '"Job dating"'
-  - '"Portes ouvertes"'
-  - '"Journée portes ouvertes"'
-  - '"Rencontre alumni"'
-
-mots_cles:
-
-  - '"emploi"'
-  - '"recrutement"'
-  - '"formation"'
-  - '"cadres"'
-  - '"enseignement supérieur"'
-  - '"université"'
-  - '"école d’ingénieurs"'
-  - '"école de commerce"'
-  - '"alumni"'
+version: 2026-11-24-v2
+legacy:
+  emploi:
+  - salon emploi
+  - forum emploi
+  - job dating
+  - forum recrutement
+  - salon recrutement
+  - salon formation
+  - forum formation
+  - emploi cadre
+  superieur:
+  - salon étudiant
+  - forum étudiant
+  - enseignement supérieur
+  - études supérieures
+  - portes ouvertes supérieur
+  - journée portes ouvertes université
+  - alumni
+  - rencontre entreprises étudiants
+web:
+  cadres:
+  - emploi cadre
+  - emploi cadres
+  - recrutement cadre
+  - recrutement cadres
+  - recrutement de cadres
+  - cadre dirigeant
+  - cadres dirigeants
+  - management
+  - manager
+  - managers
+  jeunes_diplomes:
+  - jeune diplômé
+  - jeunes diplômés
+  - jeune diplômée
+  - jeunes diplômées
+  - premier emploi
+  - premier poste
+  - jeunes talents
+  - graduate
+  - graduate program
+  - talents
+  superieur:
+  - université
+  - enseignement supérieur
+  - études supérieures
+  - master
+  - mastère
+  - bac+3
+  - bac+4
+  - bac+5
+  - doctorat
+  - doctorant
+  - doctorants
+  - docteur
+  - ingénieur
+  - ingénieurs
+  - grande école
+  - grandes écoles
+  - IAE
+  ecoles:
+  - école d’ingénieurs
+  - école d'ingénieurs
+  - école de commerce
+  - école de management
+  - business school
+  - grande école
+  - campus
+  - alumni
+  - anciens élèves
+  entreprises:
+  - forum entreprises
+  - forum entreprise
+  - rencontre entreprises
+  - rencontres entreprises
+  - relations entreprises
+  - entreprises et étudiants
+  - entreprises et diplômés
+  - rencontre employeurs
+  - employeurs
+  - recruteurs
+  - recruteur
+  recrutement:
+  - recrutement
+  - recruter
+  - job dating
+  - career day
+  - career forum
+  - career fair
+  - forum recrutement
+  - salon recrutement
+  - journée recrutement
+  carriere:
+  - carrière
+  - évolution professionnelle
+  - mobilité professionnelle
+  - reconversion
+  - transition professionnelle
+  - projet professionnel
+  - évolution de carrière
+  emploi_formation:
+  - forum emploi formation
+  - forum emploi-formation
+  - salon emploi formation
+  - salon emploi-formation
+  - emploi et formation
+  - emploi formation
+combinaisons:
+- - forum entreprises
+  - université
+- - forum entreprises
+  - master
+- - forum entreprises
+  - bac+5
+- - forum entreprises
+  - ingénieurs
+- - forum entreprises
+  - diplômés
+- - rencontre entreprises
+  - université
+- - rencontre entreprises
+  - master
+- - rencontre entreprises
+  - ingénieurs
+- - rencontre entreprises
+  - diplômés
+- - job dating
+  - cadres
+- - job dating
+  - jeunes diplômés
+- - job dating
+  - bac+5
+- - job dating
+  - ingénieurs
+- - forum emploi
+  - université
+- - forum emploi
+  - master
+- - forum emploi
+  - grande école
+- - forum emploi
+  - ingénieurs
+- - recrutement
+  - jeunes diplômés
+- - recrutement
+  - cadres
+- - recrutement
+  - ingénieurs
+- - recrutement
+  - master
+- - career day
+  - université
+- - career day
+  - école
+- - career forum
+  - université
+- - alumni
+  - entreprises
+- - alumni
+  - recrutement
+- - alumni
+  - carrière
+- - doctorat
+  - entreprises
+- - doctorants
+  - entreprises
+- - ingénieurs
+  - recrutement
+- - premier emploi
+  - diplômés
+- - objectif premier emploi
+  - université
+- - relations entreprises
+  - université
+- - rencontre employeurs
+  - université
+- - forum alternance
+  - master
+territorial_queries:
+- forum emploi
+- forum entreprises
+- salon étudiant
+- job dating
+- rencontre entreprises
+institutional_domains:
+- site:apec.fr
+- site:francetravail.fr
+- site:messervices.francetravail.fr
+- site:univ-poitiers.fr
+- site:univ-larochelle.fr
+- site:unilim.fr
+- site:data.gouv.fr
+exclusions: -"job étudiant" -"emploi étudiant" -"job saisonnier" -"emploi saisonnier"
+  -"job d’été" -"jobs d’été" -lycée -collège -"post-bac"
