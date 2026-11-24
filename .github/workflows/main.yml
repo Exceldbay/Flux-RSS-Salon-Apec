@@ -8,8 +8,6 @@ on:
 permissions:
   contents: write
 
-# Évite que deux exécutions automatiques modifient les mêmes fichiers
-# en même temps.
 concurrency:
   group: veille-apec
   cancel-in-progress: false
@@ -17,6 +15,16 @@ concurrency:
 jobs:
   recherche:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL_31: "gemini-3.1-flash-lite"
+      GEMINI_MODEL_38: "gemini-3.8-flash"
+      SEUIL_GEMINI: "24"
+      MAX_GEMINI_38_ANALYSES: "5"
+      GEMINI_31_COOLDOWN_SECONDS: "15"
+      GEMINI_38_COOLDOWN_SECONDS: "60"
 
     steps:
       - name: Récupérer le dépôt
@@ -34,73 +42,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Vérifier l'environnement
+      - name: Afficher la configuration IA
         run: |
-          python --version
-          pip --version
-          echo "Démarrage de la veille APEC..."
+          echo "========================================"
+          echo "CONFIGURATION GEMINI"
+          echo "========================================"
+          echo "Modèle base       : $GEMINI_MODEL_31"
+          echo "Modèle enrichissement : $GEMINI_MODEL_38"
+          echo "Seuil Python      : $SEUIL_GEMINI"
+          echo "3.1                : illimité"
+          echo "Cooldown 3.1       : $GEMINI_31_COOLDOWN_SECONDS s"
+          echo "3.8                : max $MAX_GEMINI_38_ANALYSES"
+          echo "Cooldown 3.8       : $GEMINI_38_COOLDOWN_SECONDS s"
 
       - name: Lancer le programme
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python -u src/main.py
 
       - name: Enregistrer les résultats
-        shell: bash
         run: |
-          set -e
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Les fichiers de data viennent d'être générés par cette exécution.
-          # On les conserve temporairement afin de pouvoir resynchroniser
-          # proprement avec la dernière version de main sans conflit Git.
-          rm -rf /tmp/veille_apec_data
-          cp -a data /tmp/veille_apec_data
-
-          # Récupère l'état le plus récent du dépôt.
-          git fetch origin main
-
-          # Repart de la dernière version distante pour éviter les conflits
-          # sur le fichier Excel et les CSV générés automatiquement.
-          git reset --hard origin/main
-
-          # Réinjecte les résultats produits par cette exécution.
-          rm -rf data
-          cp -a /tmp/veille_apec_data data
-
-          git add data/
-
+          git add data/ output/
           if git diff --cached --quiet; then
-            echo "Aucune modification dans data/"
+            echo "Aucune modification à enregistrer"
             exit 0
           fi
-
           git commit -m "Mise à jour automatique de la veille"
-
-          # Nouvelle vérification avant l'envoi, au cas où le dépôt aurait
-          # changé pendant le traitement.
           git fetch origin main
-
-          if ! git diff --quiet HEAD origin/main; then
-            echo "Le dépôt distant a changé pendant le traitement."
-            echo "Rebase impossible sans risquer un conflit sur les données générées."
-            echo "On repart de origin/main et on réapplique les données de cette exécution."
-
-            rm -rf /tmp/veille_apec_data_final
-            cp -a data /tmp/veille_apec_data_final
-
-            git reset --hard origin/main
-
-            rm -rf data
-            cp -a /tmp/veille_apec_data_final data
-
-            git add data/
-            git commit -m "Mise à jour automatique de la veille"
-          fi
-
+          git rebase origin/main
           git push origin HEAD:main
 
       - name: Fin du workflow
