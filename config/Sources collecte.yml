@@ -1,0 +1,24 @@
+# Sources supplémentaires de la veille Apec (fichier facultatif).
+# À placer dans config/. Sans ce fichier, le programme utilise sources.yml
+# (universités, écoles, villes, plateformes), OpenAgenda et Bing News.
+
+activer:
+  sites_officiels: true   # explore les sites de sources.yml + pages_html ci-dessous
+  openagenda: true        # agendas publics (jeu de données OpenDataSoft)
+  bing_news: true         # flux RSS Bing News (liens déjà décodés)
+
+# Pages d'agenda précises à explorer en plus de sources.yml.
+# "url" = page de départ, "pages" = autres pages d'agenda du même site.
+pages_html: []
+  # - nom: "Nom de l'établissement - agenda"
+  #   url: "https://exemple.fr/agenda"
+  #   departement: "86"
+  #   niveau: 2                     # 1-2 = organisateur officiel, 3 = agrégateur
+  #   pages:
+  #     - "https://exemple.fr/evenements"
+
+# Flux RSS / Atom directs (agendas d'écoles, de villes, d'organisateurs).
+flux_rss: []
+  # - nom: "Nom du flux"
+  #   url: "https://exemple.fr/agenda/rss"
+  #   departement: "86"
