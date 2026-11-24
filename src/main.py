@@ -2274,7 +2274,13 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_
         "taches_total": resume_taches["total"],
         "taches_erreurs": resume_taches["erreurs"],
     }
-    card = construire_resume_teams(delta, stats_operateurs, meta)
+    meta.update({
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+        "gemini_score_min": GEMINI_SCORE_MIN,
+        "gemini_max_analyses": MAX_IA_ANALYSES,
+        "gemini_cooldown": COOLDOWN_IA_SECONDS,
+    })
+    card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
     resultat_teams = envoyer_teams(card, DATA / "teams_last_sent.txt")
     print(f"Teams : {'OUI' if resultat_teams['envoye'] else 'NON'} — {resultat_teams['raison']}")
