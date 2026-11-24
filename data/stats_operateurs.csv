@@ -1,49 +1,49 @@
 ﻿operateur,famille,resultats_bruts,uniques,pertinents,a_verifier,non_pertinents,utiles,taux_utilite,taux_pertinent
-source:site_officiel,legacy,80,78,0,0,31,0,0.0,0.0
+source:site_officiel,legacy,92,88,0,0,35,0,0.0,0.0
 source:openagenda,legacy,426,426,0,0,247,0,0.0,0.0
 source:bing_news,legacy,7,5,0,0,2,0,0.0,0.0
-alumni,legacy,8,6,0,0,7,0,0.0,0.0
-salon recrutement,legacy,1,1,0,0,0,0,0.0,0.0
-emploi cadre,legacy,8,6,0,0,8,0,0.0,0.0
-études supérieures,legacy,303,238,0,0,214,0,0.0,0.0
-forum formation,legacy,4,3,0,0,3,0,0.0,0.0
 forum recrutement,legacy,10,5,0,0,8,0,0.0,0.0
-forum emploi,legacy,110,54,0,0,57,0,0.0,0.0
-enseignement supérieur,legacy,486,369,0,0,359,0,0.0,0.0
-job dating,legacy,240,183,0,0,111,0,0.0,0.0
-semaine de l'emploi,legacy,26,21,0,0,16,0,0.0,0.0
-salons et forums,legacy,8,5,0,0,4,0,0.0,0.0
+emploi cadre,legacy,8,6,0,0,8,0,0.0,0.0
+alumni,legacy,9,7,0,0,8,0,0.0,0.0
+études supérieures,legacy,220,175,0,0,169,0,0.0,0.0
+forum emploi,legacy,95,45,0,0,50,0,0.0,0.0
+forum formation,legacy,4,3,0,0,3,0,0.0,0.0
+salon recrutement,legacy,1,1,0,0,0,0,0.0,0.0
+job dating,legacy,307,239,0,0,121,0,0.0,0.0
+enseignement supérieur,legacy,243,190,0,0,185,0,0.0,0.0
+semaine de l'emploi,legacy,19,14,0,0,10,0,0.0,0.0
 forum alumni,legacy,1,1,0,0,0,0,0.0,0.0
-portes ouvertes,legacy,18,10,0,0,9,0,0.0,0.0
+salons et forums,legacy,8,5,0,0,4,0,0.0,0.0
+portes ouvertes,legacy,19,11,0,0,9,0,0.0,0.0
 salon étudiant,legacy,21,14,0,0,17,0,0.0,0.0
+salon formation,legacy,69,22,0,0,68,0,0.0,0.0
 salon emploi,legacy,12,5,0,0,9,0,0.0,0.0
-salon formation,legacy,65,22,0,0,64,0,0.0,0.0
 forum entreprises,legacy,1,1,0,0,1,0,0.0,0.0
 forum alternance,legacy,1,1,0,0,0,0,0.0,0.0
-"""forum entreprises"" ""master""",legacy,2,2,0,0,1,0,0.0,0.0
-"""forum entreprises"" ""diplômés""",legacy,11,9,0,0,5,0,0.0,0.0
-"""forum entreprises"" ""université""",legacy,35,24,0,0,26,0,0.0,0.0
 """forum entreprises"" ""ingénieurs""",legacy,24,18,0,0,12,0,0.0,0.0
+"""forum entreprises"" ""master""",legacy,2,2,0,0,1,0,0.0,0.0
+"""forum entreprises"" ""université""",legacy,36,25,0,0,27,0,0.0,0.0
+"""forum entreprises"" ""diplômés""",legacy,11,9,0,0,5,0,0.0,0.0
 """rencontre entreprises"" ""diplômés""",legacy,19,14,0,0,12,0,0.0,0.0
-"""job dating"" ""ingénieurs""",legacy,12,7,0,0,4,0,0.0,0.0
-"""rencontre entreprises"" ""ingénieurs""",legacy,40,30,0,0,27,0,0.0,0.0
 """rencontre entreprises"" ""master""",legacy,32,30,0,0,17,0,0.0,0.0
+"""rencontre entreprises"" ""université""",legacy,161,109,0,0,118,0,0.0,0.0
 """forum emploi"" ""master""",legacy,2,2,0,0,0,0,0.0,0.0
-"""job dating"" ""jeunes diplômés""",legacy,29,26,0,0,11,0,0.0,0.0
-"""rencontre entreprises"" ""université""",legacy,125,98,0,0,86,0,0.0,0.0
+"""job dating"" ""ingénieurs""",legacy,12,7,0,0,4,0,0.0,0.0
+"""forum emploi"" ""université""",legacy,41,26,0,0,30,0,0.0,0.0
 """recrutement"" ""cadres""",legacy,4,1,0,0,4,0,0.0,0.0
-"""forum emploi"" ""grande école""",legacy,34,28,0,0,29,0,0.0,0.0
+"""recrutement"" ""jeunes diplômés""",legacy,66,50,0,0,52,0,0.0,0.0
+"""job dating"" ""jeunes diplômés""",legacy,29,26,0,0,11,0,0.0,0.0
+"""rencontre entreprises"" ""ingénieurs""",legacy,35,26,0,0,26,0,0.0,0.0
 """forum emploi"" ""ingénieurs""",legacy,17,10,0,0,7,0,0.0,0.0
-"""forum emploi"" ""université""",legacy,39,25,0,0,29,0,0.0,0.0
-"""recrutement"" ""jeunes diplômés""",legacy,67,50,0,0,51,0,0.0,0.0
-"""premier emploi"" ""diplômés""",legacy,50,42,0,0,30,0,0.0,0.0
-"""objectif premier emploi"" ""université""",legacy,29,24,0,0,6,0,0.0,0.0
+"""forum emploi"" ""grande école""",legacy,29,25,0,0,24,0,0.0,0.0
+"""premier emploi"" ""diplômés""",legacy,57,49,0,0,33,0,0.0,0.0
+"""objectif premier emploi"" ""université""",legacy,33,28,0,0,9,0,0.0,0.0
 """rencontre employeurs"" ""université""",legacy,12,9,0,0,4,0,0.0,0.0
-"""relations entreprises"" ""université""",legacy,67,52,0,0,38,0,0.0,0.0
 """forum entreprises"" site:apec.fr",legacy,9,5,0,0,0,0,0.0,0.0
-"""forum entreprises"" site:francetravail.fr",legacy,582,143,0,0,42,0,0.0,0.0
-"""forum entreprises"" site:data.gouv.fr",legacy,173,64,0,0,22,0,0.0,0.0
 """forum entreprises"" site:univ-poitiers.fr",legacy,147,47,0,0,2,0,0.0,0.0
+"""relations entreprises"" ""université""",legacy,72,53,0,0,41,0,0.0,0.0
+"""forum entreprises"" site:francetravail.fr",legacy,583,144,0,0,43,0,0.0,0.0
 """forum entreprises"" site:unilim.fr",legacy,220,73,0,0,36,0,0.0,0.0
+"""forum entreprises"" site:data.gouv.fr",legacy,170,63,0,0,22,0,0.0,0.0
 """job dating"" ""cadres""",legacy,6,4,0,0,5,0,0.0,0.0
 """forum entreprises"" site:univ-larochelle.fr",legacy,70,26,0,0,5,0,0.0,0.0
