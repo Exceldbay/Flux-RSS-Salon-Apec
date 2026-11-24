@@ -1,22 +1,35 @@
 name: Veille APEC
 
 on:
-
   workflow_dispatch:
 
   schedule:
     - cron: "0 5 * * *"
 
+permissions:
+  contents: write
+
+concurrency:
+  group: veille-apec
+  cancel-in-progress: false
+
 jobs:
-
   recherche:
-
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: "gemini-3.8-flash"
+      SEUIL_GEMINI: "24"
+      MAX_GEMINI_ANALYSES: "50"
+      GEMINI_COOLDOWN_SECONDS: "15"
 
     steps:
-
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Installer Python
         uses: actions/setup-python@v5
@@ -28,18 +41,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Afficher la configuration IA
+        run: |
+          echo "Modèle Gemini : $GEMINI_MODEL"
+          echo "Seuil premier filtre : $SEUIL_GEMINI"
+          echo "Maximum analyses : $MAX_GEMINI_ANALYSES"
+          echo "Cooldown : $GEMINI_COOLDOWN_SECONDS s"
+
       - name: Lancer le programme
         run: |
-          python src/main.py
+          python -u src/main.py
 
       - name: Enregistrer les résultats
         run: |
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/ output/
+          if git diff --cached --quiet; then
+            echo "Aucune modification à enregistrer"
+            exit 0
+          fi
+          git commit -m "Mise à jour automatique de la veille"
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
 
-          git add data/
-
-          git diff --cached --quiet || git commit -m "Mise à jour automatique de la veille"
-
-          git push
+      - name: Fin du workflow
+        run: |
+          echo "========================================"
+          echo "VEILLE APEC TERMINÉE"
+          echo "========================================"
