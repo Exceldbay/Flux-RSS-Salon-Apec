@@ -1,8 +1,24 @@
 import os
 import json
 from google import genai
+from google.genai import errors as genai_errors
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+
+def diagnostic_gemini():
+    """Teste l’accès au modèle sans consommer une analyse métier."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return {"ok": False, "code": 0, "message": "GEMINI_API_KEY absente."}
+    try:
+        client = genai.Client(api_key=api_key)
+        modele = client.models.get(model=MODEL)
+        return {"ok": True, "code": 200, "message": f"Modèle accessible : {getattr(modele, 'name', MODEL)}"}
+    except genai_errors.APIError as e:
+        return {"ok": False, "code": getattr(e, "code", 0), "message": getattr(e, "message", str(e))[:500]}
+    except Exception as e:
+        return {"ok": False, "code": 0, "message": f"{type(e).__name__}: {str(e)[:500]}"}
 
 def analyser_resultat(resultat):
     """Analyse finale Apec : cadres, jeunes diplômés et enseignement supérieur qualifié."""
@@ -190,11 +206,22 @@ Réponds UNIQUEMENT avec ce JSON :
             "departement_ia": data.get("departement", ""),
         }
 
+    except genai_errors.APIError as e:
+        code = getattr(e, "code", "?")
+        message = getattr(e, "message", str(e))
+        return {
+            "decision_ia": "IA_INDISPONIBLE",
+            "confiance_ia": 0,
+            "raison_ia": f"Gemini API HTTP {code} ({type(e).__name__}) : {str(message)[:500]}",
+            "categorie_ia": "",
+            "date_ia": "",
+            "departement_ia": "",
+        }
     except Exception as e:
         return {
             "decision_ia": "IA_INDISPONIBLE",
             "confiance_ia": 0,
-            "raison_ia": f"Erreur IA : {type(e).__name__} : {str(e)[:300]}",
+            "raison_ia": f"Erreur IA : {type(e).__name__} : {str(e)[:500]}",
             "categorie_ia": "",
             "date_ia": "",
             "departement_ia": "",
