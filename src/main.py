@@ -3,6 +3,7 @@ from urllib.parse import quote_plus
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+import hashlib
 import threading
 import time
 import re
@@ -97,6 +98,106 @@ def court(texte, n=70):
     """Texte tronqué sur une ligne, pour des logs lisibles."""
     t = " ".join(str(texte or "").split())
     return t if len(t) <= n else t[: n - 1] + "…"
+
+
+# ============================================================
+# VERSION ET MÉMOIRE DES DÉCISIONS IA
+# ============================================================
+
+VERSION_PROGRAMME = "2026-11-24-v6"
+
+# À changer quand le prompt de ia.py ou les règles de décision évoluent :
+# toutes les décisions mémorisées avec une autre version sont ignorées.
+REGLES_VERSION = "2026-11-24"
+
+# Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
+MEMOIRE_VALIDITE_JOURS = {
+    "PERTINENT": 45,
+    "NON_PERTINENT": 45,
+    "A_VERIFIER": 10,   # la page peut être mise à jour : on revérifie plus tôt
+}
+# Décision prise sans avoir pu lire la page : on la retente très vite.
+MEMOIRE_VALIDITE_SANS_PAGE_JOURS = 3
+MEMOIRE_CONSERVATION_JOURS = 120
+
+MEMOIRE_COLONNES = [
+    "cle", "url", "titre", "decision_ia", "confiance_ia", "raison_ia",
+    "categorie_ia", "date_ia", "departement_ia", "page_lue",
+    "date_analyse", "version_regles",
+]
+
+
+def chemin_memoire():
+    return DATA / "memoire_ia.csv"
+
+
+def cle_memoire(resultat):
+    base = str(resultat.get("url") or resultat.get("titre") or "").strip().lower()
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()[:16]
+
+
+def charger_memoire():
+    """Charge la mémoire des décisions IA. Toute erreur donne une mémoire vide."""
+    chemin = chemin_memoire()
+    if not chemin.exists():
+        return {}
+    try:
+        df = pd.read_csv(chemin, dtype=str, keep_default_na=False)
+        return {
+            ligne["cle"]: ligne
+            for ligne in df.to_dict("records")
+            if ligne.get("cle")
+        }
+    except Exception as e:
+        print(f"⚠️ Mémoire IA illisible ({type(e).__name__}) : repart à vide.")
+        return {}
+
+
+def memoire_valide(entree):
+    """Vrai si la décision mémorisée peut être réutilisée sans appeler l'IA."""
+    if not entree:
+        return False
+    if entree.get("version_regles") != REGLES_VERSION:
+        return False
+
+    decision = entree.get("decision_ia", "")
+    if decision not in MEMOIRE_VALIDITE_JOURS:
+        return False
+
+    try:
+        age = (datetime.now() - datetime.fromisoformat(entree["date_analyse"])).days
+    except Exception:
+        return False
+
+    validite = (
+        MEMOIRE_VALIDITE_JOURS[decision]
+        if entree.get("page_lue") == "OUI"
+        else MEMOIRE_VALIDITE_SANS_PAGE_JOURS
+    )
+    return age < validite
+
+
+def sauvegarder_memoire(memoire):
+    """Écrit la mémoire en supprimant les entrées trop anciennes."""
+    maintenant = datetime.now()
+    gardees = []
+
+    for entree in memoire.values():
+        try:
+            age = (maintenant - datetime.fromisoformat(entree["date_analyse"])).days
+        except Exception:
+            continue
+        if age <= MEMOIRE_CONSERVATION_JOURS:
+            gardees.append({c: entree.get(c, "") for c in MEMOIRE_COLONNES})
+
+    try:
+        DATA.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(gardees, columns=MEMOIRE_COLONNES).to_csv(
+            chemin_memoire(), index=False, encoding="utf-8-sig"
+        )
+        print(f"Mémoire IA sauvegardée : {len(gardees)} décisions.")
+    except Exception as e:
+        print(f"⚠️ Mémoire IA non sauvegardée ({type(e).__name__}) : {e}")
 
 
 def load_yaml(filename):
@@ -1374,7 +1475,16 @@ def appliquer_ia(pertinents, a_verifier):
         ),
         reverse=True,
     )
-    candidats = enrichir_candidats_ia(candidats)
+
+    # Mémoire : les candidats déjà analysés récemment ne repassent pas par
+    # Gemini ni par l'enrichissement (économie de quota et de requêtes HTTP).
+    memoire = charger_memoire()
+    en_memoire = {
+        id(c) for c in candidats
+        if memoire_valide(memoire.get(cle_memoire(c)))
+    }
+    nouveaux = [c for c in candidats if id(c) not in en_memoire]
+    enrichir_candidats_ia(nouveaux)
 
     analyses = 0
     ia_resultats = []
@@ -1389,9 +1499,11 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print("COUCHE IA GEMINI")
     print("========================================")
-    print(f"Candidats à analyser : {len(candidats)}")
+    print(f"Candidats : {len(candidats)}")
+    print(f"Déjà en mémoire (décision réutilisée, sans appel IA) : {len(en_memoire)}")
+    print(f"À analyser : {len(nouveaux)}")
     print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
-    total_prevu = min(len(candidats), MAX_IA_ANALYSES)
+    total_prevu = min(len(nouveaux), MAX_IA_ANALYSES)
     print(
         f"Durée estimée : environ {total_prevu * COOLDOWN_IA_SECONDS / 60:.0f} min "
         f"(cooldown {COOLDOWN_IA_SECONDS} s entre deux appels)"
@@ -1400,11 +1512,13 @@ def appliquer_ia(pertinents, a_verifier):
 
     for resultat in candidats:
         statut_python = str(resultat.get("statut", "À vérifier"))
+        cle = cle_memoire(resultat)
+        depuis_memoire = id(resultat) in en_memoire
 
         # ----------------------------------------------------
         # Plus d'appel après la limite d'analyses
         # ----------------------------------------------------
-        if analyses >= MAX_IA_ANALYSES:
+        if not depuis_memoire and analyses >= MAX_IA_ANALYSES:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
             resultat["raison_ia"] = "Limite maximale d'analyses IA atteinte."
@@ -1424,7 +1538,7 @@ def appliquer_ia(pertinents, a_verifier):
         # ----------------------------------------------------
         # Quota Gemini déjà atteint : zéro nouvel appel
         # ----------------------------------------------------
-        if quota_bloque:
+        if not depuis_memoire and quota_bloque:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
             resultat["raison_ia"] = (
@@ -1447,19 +1561,48 @@ def appliquer_ia(pertinents, a_verifier):
         # ----------------------------------------------------
         # Appel Gemini
         # ----------------------------------------------------
-        if dernier_appel:
-            attente = COOLDOWN_IA_SECONDS - (time.time() - dernier_appel)
-            if attente > 0:
-                time.sleep(attente)
+        if depuis_memoire:
+            entree = memoire[cle]
+            analyse = {
+                "decision_ia": entree.get("decision_ia", ""),
+                "confiance_ia": int(float(entree.get("confiance_ia") or 0)),
+                "raison_ia": entree.get("raison_ia", ""),
+                "categorie_ia": entree.get("categorie_ia", ""),
+                "date_ia": entree.get("date_ia", ""),
+                "departement_ia": entree.get("departement_ia", ""),
+                "erreur_ia_type": "",
+            }
+        else:
+            if dernier_appel:
+                attente = COOLDOWN_IA_SECONDS - (time.time() - dernier_appel)
+                if attente > 0:
+                    time.sleep(attente)
 
-        analyse = analyser_resultat(resultat)
-        dernier_appel = time.time()
-        analyses += 1
+            analyse = analyser_resultat(resultat)
+            dernier_appel = time.time()
+            analyses += 1
+
+            # Mémorisation des seules décisions exploitables (pas les erreurs).
+            if analyse.get("decision_ia") in MEMOIRE_VALIDITE_JOURS:
+                memoire[cle] = {
+                    "cle": cle,
+                    "url": resultat.get("url", ""),
+                    "titre": resultat.get("titre", ""),
+                    "decision_ia": analyse.get("decision_ia", ""),
+                    "confiance_ia": analyse.get("confiance_ia", 0),
+                    "raison_ia": analyse.get("raison_ia", ""),
+                    "categorie_ia": analyse.get("categorie_ia", ""),
+                    "date_ia": analyse.get("date_ia", ""),
+                    "departement_ia": analyse.get("departement_ia", ""),
+                    "page_lue": resultat.get("page_enrichie", "NON"),
+                    "date_analyse": datetime.now().isoformat(timespec="seconds"),
+                    "version_regles": REGLES_VERSION,
+                }
+
         resultat.update(analyse)
-        resultat["ia_analyse"] = "OUI"
+        resultat["ia_analyse"] = "MEMOIRE" if depuis_memoire else "OUI"
 
         decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
-        raison = str(analyse.get("raison_ia", "")).lower()
 
         # Normalisation stricte de la date IA : une année seule n'est
         # jamais enregistrée comme date d'événement.
@@ -1500,10 +1643,11 @@ def appliquer_ia(pertinents, a_verifier):
         # ----------------------------------------------------
         type_erreur = str(analyse.get("erreur_ia_type", ""))
 
-        if decision == "IA_INDISPONIBLE":
-            erreurs_consecutives += 1
-        else:
-            erreurs_consecutives = 0
+        if not depuis_memoire:
+            if decision == "IA_INDISPONIBLE":
+                erreurs_consecutives += 1
+            else:
+                erreurs_consecutives = 0
 
         quota_detecte = False
         if type_erreur in {"QUOTA_JOUR", "QUOTA_MINUTE", "CLE_ABSENTE"}:
@@ -1528,8 +1672,9 @@ def appliquer_ia(pertinents, a_verifier):
             if decision != "IA_INDISPONIBLE"
             else (type_erreur or "erreur")
         )
+        etiquette = "MÉMOIRE" if depuis_memoire else f"IA {analyses}/{total_prevu}"
         print(
-            f"[IA {analyses}/{total_prevu}] {icone} {decision} ({detail}) "
+            f"[{etiquette}] {icone} {decision} ({detail}) "
             f"| dép. {resultat.get('departement', '?')} "
             f"| score {resultat.get('score', 0)} "
             f"| {court(resultat.get('titre', ''))}",
@@ -1567,6 +1712,8 @@ def appliquer_ia(pertinents, a_verifier):
 
     nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    sauvegarder_memoire(memoire)
 
     non_traites = sum(1 for x in ia_resultats if x.get("decision_ia") == "IA_NON_ANALYSE")
     print()
@@ -1732,7 +1879,7 @@ def sauvegarder(
     # Fichier dédié à l'audit IA.
     candidats_ia = [
         r for r in tous
-        if r.get("ia_analyse") == "OUI"
+        if r.get("ia_analyse") in ("OUI", "MEMOIRE")
         or r.get("decision_ia") == "IA_INDISPONIBLE"
         or r.get("decision_ia") == "IA_NON_ANALYSE"
     ]
@@ -1783,6 +1930,11 @@ def main():
     print("VEILLE APEC")
     print("COLLECTEUR RSS + SCORING APEC AUDITÉ")
     print("========================================")
+    print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
+    print(
+        f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
+        f"cooldown IA : {COOLDOWN_IA_SECONDS} s | max analyses : {MAX_IA_ANALYSES}"
+    )
 
     departements = load_yaml("departements.yml")
     requetes = construire_requetes(departements)
