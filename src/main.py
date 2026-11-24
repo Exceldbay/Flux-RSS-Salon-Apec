@@ -11,6 +11,7 @@ import json
 import difflib
 import subprocess
 import sys
+import os
 
 import feedparser
 import pandas as pd
@@ -21,6 +22,7 @@ from bs4 import BeautifulSoup
 
 from ia import analyser_resultat
 from sources_externes import collecter_sources_externes
+from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
 
 def synchroniser_excel():
@@ -75,8 +77,9 @@ OUTPUT = ROOT / "output"
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
-MAX_IA_ANALYSES = 100
-COOLDOWN_IA_SECONDS = 15      # pause entre deux appels Gemini
+MAX_IA_ANALYSES = int(os.getenv("MAX_GEMINI_ANALYSES", "50"))
+COOLDOWN_IA_SECONDS = int(os.getenv("GEMINI_COOLDOWN_SECONDS", "15"))
+GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 
 # Gestion des années : 2027 est la priorité, 2025 et avant sont écartés.
@@ -87,8 +90,11 @@ SEUIL_VERIF_2027 = 6      # seuil « À vérifier » assoupli pour 2027 (10 sino
 MALUS_HORS_PERIODE = 40
 
 # V9 : filtres / priorisation
-SEUIL_IA_MIN = 8                 # en dessous : pas d'appel Gemini
-SEUIL_IA_MAX = 30                # au-dessus : décision Python souvent suffisante
+# Gemini intervient uniquement après le premier filtre Python.
+# Les candidats atteignant ce score sont les plus pertinents et sont classés
+# par score décroissant avant limitation à MAX_IA_ANALYSES.
+SEUIL_IA_MIN = GEMINI_SCORE_MIN
+SEUIL_IA_MAX = 999
 SEUIL_AUTO_PERTINENT = 32        # score local suffisamment fort
 SEUIL_SOURCE_OFFICIELLE = 1
 SIMILARITE_TITRE_DEDOUBLONNAGE = 0.94
@@ -114,7 +120,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-24-v9-precision"
+VERSION_PROGRAMME = "2026-11-24-v10-delta-teams"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -1741,31 +1747,30 @@ def classer_statut_final(resultat, decision):
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier):
-    """Analyse les candidats avec Gemini sans perdre les décisions Python."""
+    """Analyse Gemini uniquement les candidats ayant passé le premier filtre Python."""
 
     tous_candidats = pertinents + a_verifier
 
-    # V9.4 : Gemini est réservé aux cas ambigus. Les scores locaux très forts
-    # restent autonomes, ce qui réduit fortement la consommation de quota.
+    # Premier test Python : Gemini ne voit que les candidats ayant atteint
+    # le seuil défini par SEUIL_GEMINI. Les signaux indirects ne forcent plus
+    # un appel IA : ils doivent d'abord passer ce premier filtre.
     candidats = []
-    non_necessaires = []
+    non_eligibles = []
     for candidat in tous_candidats:
         score = int(candidat.get("score", 0) or 0)
-        indirect = "OUI" if candidat.get("preuve_evenement") == "NON" else "NON"
-        if (
-            SEUIL_IA_MIN <= score <= SEUIL_IA_MAX
-            or candidat.get("statut") == "À vérifier"
-            or indirect == "OUI"
-        ):
+        if score >= GEMINI_SCORE_MIN:
             candidats.append(candidat)
         else:
             candidat["decision_ia"] = "IA_NON_REQUISE"
-            candidat["confiance_ia"] = 100 if candidat.get("statut") == "Pertinent" else 0
-            candidat["raison_ia"] = "Décision locale suffisamment robuste : appel Gemini non nécessaire."
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = (
+                f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}."
+            )
             candidat["ia_analyse"] = "NON"
             candidat["statut_final"] = candidat.get("statut", "À vérifier")
-            non_necessaires.append(candidat)
+            non_eligibles.append(candidat)
 
+    # Les plus pertinents passent en premier.
     candidats.sort(
         key=lambda x: (
             str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
@@ -1773,6 +1778,22 @@ def appliquer_ia(pertinents, a_verifier):
         ),
         reverse=True,
     )
+
+    # Protection quota : même si 100+ candidats passent le premier filtre,
+    # seuls les N meilleurs sont envoyés à Gemini sur cette exécution.
+    candidats = candidats[:MAX_IA_ANALYSES]
+    limite_non_analyse = []
+    for candidat in (pertinents + a_verifier):
+        if candidat in non_eligibles or candidat in candidats:
+            continue
+        candidat["decision_ia"] = "IA_NON_ANALYSE"
+        candidat["confiance_ia"] = 0
+        candidat["raison_ia"] = (
+            f"Candidat éligible Gemini mais hors quota local : top {MAX_IA_ANALYSES} uniquement."
+        )
+        candidat["ia_analyse"] = "NON"
+        candidat["statut_final"] = candidat.get("statut", "À vérifier")
+        limite_non_analyse.append(candidat)
 
     memoire = charger_memoire()
     en_memoire = {
@@ -1782,8 +1803,8 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux = [c for c in candidats if id(c) not in en_memoire]
     enrichir_candidats_ia(nouveaux)
 
-    # L'enrichissement apporte date/lieu/organisateur et permet donc un
-    # second calcul plus précis avant l'appel Gemini.
+    # L'enrichissement apporte date/lieu/organisateur et permet un second
+    # calcul avant l'appel Gemini, sans élargir la sélection initiale.
     for candidat in nouveaux:
         score_data = calculer_score(candidat)
         candidat.update(score_data)
@@ -1801,15 +1822,19 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print("COUCHE IA GEMINI")
     print("========================================")
-    print(f"Candidats à potentiel IA : {len(candidats)}")
-    print(f"IA non nécessaire : {len(non_necessaires)}")
-    print(f"Déjà en mémoire (décision réutilisée, sans appel IA) : {len(en_memoire)}")
-    print(f"À analyser : {len(nouveaux)}")
-    print(f"Maximum d'analyses IA : {MAX_IA_ANALYSES}")
-    total_prevu = min(len(nouveaux), MAX_IA_ANALYSES)
+    print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
+    print(f"Candidats ayant passé le filtre : {len(pertinents) + len(a_verifier) - len(non_eligibles)}")
+    print(f"Candidats envoyés à Gemini : {len(candidats)}")
+    print(f"Non éligibles Gemini : {len(non_eligibles)}")
+    print(f"Éligibles mais hors top {MAX_IA_ANALYSES} : {len(limite_non_analyse)}")
+    print(f"Déjà en mémoire (réutilisés sans appel) : {len(en_memoire)}")
+    print(f"Nouveaux appels prévus : {len(nouveaux)}")
+    print(f"Modèle Gemini : {os.getenv('GEMINI_MODEL', 'gemini-3.8-flash')}")
+    print(f"Cooldown : {COOLDOWN_IA_SECONDS} s")
+    total_prevu = len(nouveaux)
     print(
-        f"Durée estimée : environ {total_prevu * COOLDOWN_IA_SECONDS / 60:.0f} min "
-        f"(cooldown {COOLDOWN_IA_SECONDS} s entre deux appels)"
+        f"Durée maximale théorique de la partie cooldown : "
+        f"{max(0, total_prevu - 1) * COOLDOWN_IA_SECONDS / 60:.1f} min"
     )
     print(flush=True)
 
@@ -1818,9 +1843,6 @@ def appliquer_ia(pertinents, a_verifier):
         cle = cle_memoire(resultat)
         depuis_memoire = id(resultat) in en_memoire
 
-        # ----------------------------------------------------
-        # Plus d'appel après la limite d'analyses
-        # ----------------------------------------------------
         if not depuis_memoire and analyses >= MAX_IA_ANALYSES:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
@@ -1830,7 +1852,6 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["departement_ia"] = ""
             resultat["ia_analyse"] = "NON"
             resultat["statut_final"] = statut_python
-
             ia_resultats.append(resultat)
             if statut_python == "Pertinent":
                 nouveaux_pertinents.append(resultat)
@@ -1838,9 +1859,6 @@ def appliquer_ia(pertinents, a_verifier):
                 nouveaux_a_verifier.append(resultat)
             continue
 
-        # ----------------------------------------------------
-        # Quota Gemini déjà atteint : zéro nouvel appel
-        # ----------------------------------------------------
         if not depuis_memoire and quota_bloque:
             resultat["decision_ia"] = "IA_NON_ANALYSE"
             resultat["confiance_ia"] = 0
@@ -1853,7 +1871,6 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["departement_ia"] = ""
             resultat["ia_analyse"] = "NON"
             resultat["statut_final"] = statut_python
-
             ia_resultats.append(resultat)
             if statut_python == "Pertinent":
                 nouveaux_pertinents.append(resultat)
@@ -1861,9 +1878,6 @@ def appliquer_ia(pertinents, a_verifier):
                 nouveaux_a_verifier.append(resultat)
             continue
 
-        # ----------------------------------------------------
-        # Appel Gemini
-        # ----------------------------------------------------
         if depuis_memoire:
             entree = memoire[cle]
             analyse = {
@@ -1881,11 +1895,16 @@ def appliquer_ia(pertinents, a_verifier):
                 if attente > 0:
                     time.sleep(attente)
 
+            position = analyses + 1
+            print(
+                f"[IA] {position}/{total_prevu} — "
+                f"score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}",
+                flush=True,
+            )
             analyse = analyser_resultat(resultat)
             dernier_appel = time.time()
             analyses += 1
 
-            # Mémorisation des seules décisions exploitables (pas les erreurs).
             if analyse.get("decision_ia") in MEMOIRE_VALIDITE_JOURS:
                 memoire[cle] = {
                     "cle": cle,
@@ -1904,48 +1923,10 @@ def appliquer_ia(pertinents, a_verifier):
 
         resultat.update(analyse)
         resultat["ia_analyse"] = "MEMOIRE" if depuis_memoire else "OUI"
-
         decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
-
-        # Normalisation stricte de la date IA : une année seule n'est
-        # jamais enregistrée comme date d'événement.
         resultat["date_ia"] = normaliser_date_ia(resultat.get("date_ia", ""))
 
-        # ----------------------------------------------------
-        # Protection département
-        # ----------------------------------------------------
-        dept_python = str(resultat.get("departement", "")).strip()
-        dept_ia = str(resultat.get("departement_ia", "")).strip()
-
-        if dept_python and dept_ia and dept_ia != dept_python:
-            resultat["raison_ia"] = (
-                str(resultat.get("raison_ia", ""))
-                + " | Conflit de département avec la détection Python : vérification requise."
-            ).strip(" |")
-            decision = "A_VERIFIER"
-            resultat["decision_ia"] = decision
-
-        zone = {"16", "17", "19", "23", "79", "86", "87"}
-        if dept_ia and dept_ia not in zone:
-            if resultat.get("geographie_verifiee") == "OUI":
-                # Python a trouvé des indices géographiques dans la zone :
-                # le désaccord est ambigu, vérification humaine.
-                decision = "A_VERIFIER"
-            else:
-                # Le département Python vient seulement de la requête et
-                # rien ne le confirme : l'IA situe l'événement hors zone.
-                decision = "NON_PERTINENT"
-                resultat["raison_ia"] = (
-                    str(resultat.get("raison_ia", ""))
-                    + f" | Hors zone confirmé (département IA : {dept_ia})."
-                ).strip(" |")
-            resultat["decision_ia"] = decision
-
-        # ----------------------------------------------------
-        # Détection des quotas et pannes (type d'erreur structuré)
-        # ----------------------------------------------------
         type_erreur = str(analyse.get("erreur_ia_type", ""))
-
         if not depuis_memoire:
             if decision == "IA_INDISPONIBLE":
                 erreurs_consecutives += 1
@@ -1970,27 +1951,19 @@ def appliquer_ia(pertinents, a_verifier):
             "NON_PERTINENT": "🔴",
             "IA_INDISPONIBLE": "⚠️",
         }.get(decision, "•")
-        detail = (
-            f"{resultat.get('confiance_ia', 0)}%"
-            if decision != "IA_INDISPONIBLE"
-            else (type_erreur or "erreur")
-        )
+        detail = f"{resultat.get('confiance_ia', 0)}%" if decision != "IA_INDISPONIBLE" else (type_erreur or "erreur")
         etiquette = "MÉMOIRE" if depuis_memoire else f"IA {analyses}/{total_prevu}"
         print(
-            f"[{etiquette}] {icone} {decision} ({detail}) "
-            f"| dép. {resultat.get('departement', '?')} "
-            f"| score {resultat.get('score', 0)} "
-            f"| {court(resultat.get('titre', ''))}",
+            f"[{etiquette}] {icone} {decision} ({detail}) | dép. "
+            f"{resultat.get('departement', '?')} | score {resultat.get('score', 0)} | "
+            f"{court(resultat.get('titre', ''))}",
             flush=True,
         )
 
         if quota_detecte:
             quota_bloque = True
-            print(f"⛔ Arrêt des appels IA : {motif_arret}")
-            # L'appel a bien été tenté, donc OUI, mais le résultat IA
-            # ne remplace jamais le statut Python.
+            print(f"⛔ Arrêt des appels IA : {motif_arret}", flush=True)
             resultat["statut_final"] = statut_python
-
             ia_resultats.append(resultat)
             if statut_python == "Pertinent":
                 nouveaux_pertinents.append(resultat)
@@ -1998,56 +1971,314 @@ def appliquer_ia(pertinents, a_verifier):
                 nouveaux_a_verifier.append(resultat)
             continue
 
-        # ----------------------------------------------------
-        # Décision IA normale
-        # ----------------------------------------------------
         classer_statut_final(resultat, decision)
-
         if decision == "PERTINENT":
             nouveaux_pertinents.append(resultat)
         elif decision == "NON_PERTINENT":
-            # Traité dans main() pour conserver le groupe non pertinent.
             pass
         else:
             nouveaux_a_verifier.append(resultat)
-
         ia_resultats.append(resultat)
-
-    # Réintégration des candidats dont l'IA n'était pas nécessaire.
-    ia_resultats.extend(non_necessaires)
-    nouveaux_pertinents.extend(
-        x for x in non_necessaires if x.get("statut_final") == "Pertinent"
-    )
-    nouveaux_a_verifier.extend(
-        x for x in non_necessaires if x.get("statut_final") == "À vérifier"
-    )
-
-    nouveaux_pertinents.sort(
-        key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")),
-                       x.get("confiance_ia", 0), x.get("score", 0)),
-        reverse=True
-    )
-    nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     sauvegarder_memoire(memoire)
 
-    non_traites = sum(1 for x in ia_resultats if x.get("decision_ia") == "IA_NON_ANALYSE")
+    # Réintégration : les candidats hors IA restent disponibles dans la sortie
+    # et conservent leur classement Python initial.
+    hors_ia = non_eligibles + limite_non_analyse
+    ia_resultats.extend(hors_ia)
+    for resultat in hors_ia:
+        if resultat.get("statut") == "Pertinent":
+            nouveaux_pertinents.append(resultat)
+        else:
+            nouveaux_a_verifier.append(resultat)
+
     print()
+    non_traites = sum(1 for x in ia_resultats if x.get("decision_ia") == "IA_NON_ANALYSE")
     print(f"Analyses IA effectuées : {analyses}")
     print(f"Candidats non analysés (conservés) : {non_traites}")
-    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}"
-          + (f" ({motif_arret})" if quota_bloque else ""))
+    print(f"Blocage quota Gemini : {'OUI' if quota_bloque else 'NON'}" + (f" ({motif_arret})" if quota_bloque else ""))
     print(
         "Décisions IA : "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'NON_PERTINENT')} non pertinent / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_REQUIS' or x.get('decision_ia') == 'IA_NON_REQUISE')} non requis / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_ANALYSE')} non analysé"
     )
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
 
+
+# ============================================================
+# SUIVI PRÉCIS DES TÂCHES
+# ============================================================
+
+SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
+SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
+
+
+def _nouvelle_tache(nom, description=""):
+    return {
+        "id": f"T{len(_SUIVI_TACHES)+1:02d}",
+        "tache": nom,
+        "description": description,
+        "statut": "EN ATTENTE",
+        "debut": "",
+        "fin": "",
+        "duree_s": 0,
+        "details": "",
+        "erreur": "",
+    }
+
+
+_SUIVI_TACHES = []
+
+
+def initialiser_suivi_taches():
+    global _SUIVI_TACHES
+    noms = [
+        ("Collecte RSS", "Interrogation des requêtes legacy + V2"),
+        ("Collecte sources externes", "Sites institutionnels, OpenAgenda et autres sources"),
+        ("Dédoublonnage", "Fusion des résultats identiques ou quasi identiques"),
+        ("Scoring / qualification", "Détection événement, cible, géographie et période"),
+        ("Enrichissement pages", "Récupération des dates, lieux et organisateurs"),
+        ("Analyse IA", "Analyse Gemini des cas ambigus"),
+        ("Delta / historique", "Comparaison avec la veille précédente"),
+        ("Statistiques opérateurs", "Mesure du rendement des requêtes"),
+        ("Sauvegarde CSV", "Écriture des résultats et audits"),
+        ("Synchronisation Excel", "Mise à jour du classeur"),
+        ("Préparation Teams", "Construction de la synthèse quotidienne"),
+        ("Envoi Teams", "Notification Teams si configurée et autorisée"),
+    ]
+    _SUIVI_TACHES = [_nouvelle_tache(n, d) for n, d in noms]
+
+
+def demarrer_tache(index, details=""):
+    t = _SUIVI_TACHES[index]
+    t["statut"] = "EN COURS"
+    t["debut"] = datetime.now().isoformat(timespec="seconds")
+    t["details"] = details
+    return t
+
+
+def terminer_tache(index, statut="TERMINEE", details="", erreur=""):
+    t = _SUIVI_TACHES[index]
+    t["fin"] = datetime.now().isoformat(timespec="seconds")
+    t["statut"] = statut
+    if details:
+        t["details"] = details
+    if erreur:
+        t["erreur"] = erreur
+    if t["debut"]:
+        try:
+            debut = datetime.fromisoformat(t["debut"])
+            fin = datetime.fromisoformat(t["fin"])
+            t["duree_s"] = round((fin - debut).total_seconds(), 2)
+        except Exception:
+            pass
+    print(f"[TÂCHE {t['id']}] {t['statut']} — {t['tache']} — {t['details']}", flush=True)
+    return t
+
+
+def echouer_tache(index, erreur):
+    return terminer_tache(index, "ERREUR", erreur=erreur, details="La tâche a échoué")
+
+
+def sauvegarder_suivi_taches():
+    DATA.mkdir(exist_ok=True)
+    SUIVI_TACHES_JSON.write_text(
+        json.dumps({
+            "date_generation": datetime.now().isoformat(timespec="seconds"),
+            "taches": _SUIVI_TACHES,
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    pd.DataFrame(_SUIVI_TACHES).to_csv(
+        SUIVI_TACHES_CSV, index=False, encoding="utf-8-sig"
+    )
+
+
+def resume_suivi_taches():
+    total = len(_SUIVI_TACHES)
+    terminees = sum(t["statut"] == "TERMINEE" for t in _SUIVI_TACHES)
+    erreurs = sum(t["statut"] == "ERREUR" for t in _SUIVI_TACHES)
+    en_cours = sum(t["statut"] == "EN COURS" for t in _SUIVI_TACHES)
+    return {"total": total, "terminees": terminees, "erreurs": erreurs, "en_cours": en_cours}
+
+
+# ============================================================
+# PRIORITÉS 8-10 : DELTA / OPÉRATEURS / TEAMS
+# ============================================================
+
+def _cle_resultat_delta(resultat):
+    """Clé stable pour comparer deux veilles successives."""
+    url = canoniser_url(
+        resultat.get("url_finale")
+        or resultat.get("url_reelle")
+        or resultat.get("url")
+    )
+    if url:
+        return "url:" + url
+    titre = cle_titre_evenement(resultat.get("titre_page") or resultat.get("titre"))
+    return "titre:" + titre
+
+
+def charger_ancienne_veille():
+    chemin = DATA / "resultats_rss.csv"
+    if not chemin.exists():
+        return []
+    try:
+        df = pd.read_csv(chemin, dtype=str, keep_default_na=False)
+        return df.to_dict("records")
+    except Exception as e:
+        print(f"⚠️ Ancienne veille illisible pour le delta : {type(e).__name__} : {e}")
+        return []
+
+
+def calculer_delta_veille(ancienne, actuels):
+    """Priorité 8 : détecte les mouvements réellement utiles."""
+    anciens = {_cle_resultat_delta(x): x for x in ancienne}
+    courants = {_cle_resultat_delta(x): x for x in actuels}
+    nouveaux_pertinents = []
+    promus_pertinents = []
+    nouveaux_a_verifier_2027 = []
+    evolutions = []
+
+    for cle, courant in courants.items():
+        ancien = anciens.get(cle)
+        statut_c = courant.get("statut_final") or courant.get("statut", "")
+        statut_a = (ancien or {}).get("statut_final") or (ancien or {}).get("statut", "")
+
+        if ancien is None:
+            if statut_c == "Pertinent":
+                nouveaux_pertinents.append(courant)
+            elif statut_c == "À vérifier" and "2027" in str(courant.get("annee_detectee", "")):
+                nouveaux_a_verifier_2027.append(courant)
+            continue
+
+        if statut_c == "Pertinent" and statut_a != "Pertinent":
+            promus_pertinents.append(courant)
+
+        score_c = int(float(courant.get("score", 0) or 0))
+        score_a = int(float(ancien.get("score", 0) or 0))
+        priorite_c = courant.get("priorite_2027", "")
+        priorite_a = ancien.get("priorite_2027", "")
+        if statut_c != statut_a or abs(score_c - score_a) >= 8 or priorite_c != priorite_a:
+            evolutions.append(courant)
+
+    nouveaux_pertinents.sort(key=lambda x: (x.get("priorite_2027") != "FORTE", -int(x.get("score", 0) or 0)))
+    promus_pertinents.sort(key=lambda x: -int(x.get("score", 0) or 0))
+    nouveaux_a_verifier_2027.sort(key=lambda x: -int(x.get("score", 0) or 0))
+
+    return {
+        "nouveaux_pertinents": nouveaux_pertinents,
+        "promus_pertinents": promus_pertinents,
+        "nouveaux_a_verifier_2027": nouveaux_a_verifier_2027,
+        "evolutions_utiles": len(evolutions),
+        "evolutions": evolutions,
+        "premiere_veille": not bool(ancienne),
+    }
+
+
+def generer_stats_operateurs(resultats_bruts, actuels):
+    """Priorité 9 : mesure les opérateurs sur les résultats uniques et utiles."""
+    statut_par_cle = {
+        _cle_resultat_delta(r): (r.get("statut_final") or r.get("statut", ""))
+        for r in actuels
+    }
+    groupes = {}
+    for r in resultats_bruts:
+        operateur = r.get("mot_cle") or "non défini"
+        famille = r.get("famille_operateur") or r.get("operateur_web") or "legacy"
+        cle = _cle_resultat_delta(r)
+        statut = statut_par_cle.get(cle, "")
+        g = groupes.setdefault(operateur, {
+            "operateur": operateur,
+            "famille": famille,
+            "resultats_bruts": 0,
+            "uniques": set(),
+            "pertinents": 0,
+            "a_verifier": 0,
+            "non_pertinents": 0,
+        })
+        g["resultats_bruts"] += 1
+        g["uniques"].add(cle)
+        if statut == "Pertinent":
+            g["pertinents"] += 1
+        elif statut == "À vérifier":
+            g["a_verifier"] += 1
+        elif statut == "Non pertinent":
+            g["non_pertinents"] += 1
+
+    lignes = []
+    for g in groupes.values():
+        uniques = len(g["uniques"])
+        utiles = g["pertinents"] + g["a_verifier"]
+        lignes.append({
+            "operateur": g["operateur"],
+            "famille": g["famille"],
+            "resultats_bruts": g["resultats_bruts"],
+            "uniques": uniques,
+            "pertinents": g["pertinents"],
+            "a_verifier": g["a_verifier"],
+            "non_pertinents": g["non_pertinents"],
+            "utiles": utiles,
+            "taux_utilite": round((utiles / uniques) * 100, 1) if uniques else 0,
+            "taux_pertinent": round((g["pertinents"] / uniques) * 100, 1) if uniques else 0,
+        })
+    lignes.sort(key=lambda x: (x["pertinents"], x["a_verifier"], x["utiles"], x["taux_utilite"]), reverse=True)
+    return lignes
+
+
+def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_resultats):
+    """Génère les fichiers d'audit et, si configuré, la notification Teams."""
+    DATA.mkdir(exist_ok=True)
+    OUTPUT.mkdir(exist_ok=True)
+    lignes_delta = []
+    for type_delta, groupe in (
+        ("nouveau_pertinent", delta["nouveaux_pertinents"]),
+        ("promu_pertinent", delta["promus_pertinents"]),
+        ("nouveau_2027_a_verifier", delta["nouveaux_a_verifier_2027"]),
+    ):
+        for r in groupe:
+            lignes_delta.append({
+                "type_delta": type_delta,
+                "titre": r.get("titre", ""),
+                "url": r.get("url", ""),
+                "source": r.get("source", ""),
+                "departement": r.get("departement", ""),
+                "score": r.get("score", ""),
+                "statut_final": r.get("statut_final", r.get("statut", "")),
+                "priorite_2027": r.get("priorite_2027", ""),
+                "date_evenement_page": r.get("date_evenement_page", ""),
+            })
+    pd.DataFrame(lignes_delta, columns=[
+        "type_delta", "titre", "url", "source", "departement", "score",
+        "statut_final", "priorite_2027", "date_evenement_page"
+    ]).to_csv(DATA / "delta_veille.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(stats_operateurs).to_csv(DATA / "stats_operateurs.csv", index=False, encoding="utf-8-sig")
+
+    resume_taches = resume_suivi_taches()
+    sauvegarder_suivi_taches()
+
+    meta = {
+        "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "pertinents": len(pertinents),
+        "a_verifier": len(a_verifier),
+        "ia_analysees": sum(1 for r in ia_resultats if r.get("ia_analyse") == "OUI"),
+        "ia_memoire": sum(1 for r in ia_resultats if r.get("ia_analyse") == "MEMOIRE"),
+        "ia_non_analyse": sum(1 for r in ia_resultats if r.get("decision_ia") == "IA_NON_ANALYSE"),
+        "quota_bloque": "OUI" if any(str(r.get("decision_ia", "")) == "IA_INDISPONIBLE" for r in ia_resultats) else "NON",
+        "taches_terminees": resume_taches["terminees"],
+        "taches_total": resume_taches["total"],
+        "taches_erreurs": resume_taches["erreurs"],
+    }
+    card = construire_resume_teams(delta, stats_operateurs, meta)
+    sauvegarder_payload(card, OUTPUT / "teams_payload.json")
+    resultat_teams = envoyer_teams(card, DATA / "teams_last_sent.txt")
+    print(f"Teams : {'OUI' if resultat_teams['envoye'] else 'NON'} — {resultat_teams['raison']}")
+    return resultat_teams
 
 # ============================================================
 # SAUVEGARDE
@@ -2255,8 +2486,13 @@ def main():
     print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
     print(
         f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
-        f"cooldown IA : {COOLDOWN_IA_SECONDS} s | max analyses : {MAX_IA_ANALYSES}"
+        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | cooldown : {COOLDOWN_IA_SECONDS} s | max analyses : {MAX_IA_ANALYSES}"
     )
+
+    initialiser_suivi_taches()
+    sauvegarder_suivi_taches()
+
+    ancienne_veille = charger_ancienne_veille()
 
     departements = load_yaml("departements.yml")
     requetes = construire_requetes(departements)
@@ -2264,11 +2500,19 @@ def main():
     print()
     print(f"Requêtes générées : {len(requetes)}")
 
-    resultats_bruts, erreurs = collecter(requetes)
+    demarrer_tache(0, f"{len(requetes)} requêtes")
+    try:
+        resultats_bruts, erreurs = collecter(requetes)
+        terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {len(erreurs)} erreurs")
+    except Exception as e:
+        echouer_tache(0, str(e))
+        sauvegarder_suivi_taches()
+        raise
 
     # Sources externes (sites officiels, OpenAgenda, Bing News, flux directs).
     # En tête de liste : le dédoublonnage garde la première occurrence, donc
     # la source primaire l'emporte sur l'article de presse.
+    demarrer_tache(1)
     try:
         # mot de la zone (nom de département ou ville) -> code département
         zone = {}
@@ -2293,6 +2537,9 @@ def main():
     except Exception as e:
         print(f"⚠️ Sources externes ignorées : {type(e).__name__} : {e}")
         externes = []
+        terminer_tache(1, "ERREUR", erreur=f"{type(e).__name__}: {e}")
+    else:
+        terminer_tache(1, details=f"{len(externes)} résultats externes")
 
     resultats_bruts = externes + resultats_bruts
 
@@ -2309,17 +2556,19 @@ def main():
         print(f"Erreurs HTTP/RSS : {erreurs}")
         return
 
-    pertinents, a_verifier, non_pertinents = traiter(
-        resultats_bruts
-    )
+    demarrer_tache(2, f"{len(resultats_bruts)} résultats bruts")
+    pertinents, a_verifier, non_pertinents = traiter(resultats_bruts)
+    terminer_tache(2, details=f"{len(pertinents)+len(a_verifier)+len(non_pertinents)} résultats conservés après traitement")
+
+    demarrer_tache(3)
+    terminer_tache(3, details=f"{len(pertinents)} pertinents / {len(a_verifier)} à vérifier / {len(non_pertinents)} non pertinents")
 
     # --------------------------------------------------------
     # COUCHE IA
     # --------------------------------------------------------
-    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
-        pertinents,
-        a_verifier
-    )
+    demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
+    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(pertinents, a_verifier)
+    terminer_tache(5, details=f"{len(ia_resultats)} candidats traités")
 
     # Les candidats que l'IA déclare NON_PERTINENT restent dans
     # non_pertinents. En cas d'indisponibilité de l'IA, on conserve
@@ -2354,18 +2603,60 @@ def main():
     print(f"À vérifier : {len(a_verifier)}")
     print(f"Non pertinents : {len(non_pertinents)}")
 
-    sauvegarde_ok = sauvegarder(
-        pertinents,
-        a_verifier,
-        non_pertinents,
-        resultats_bruts
+    # Priorités 8-10 : delta, performance des opérateurs et sortie Teams.
+    actuels_utiles = pertinents + a_verifier
+    demarrer_tache(6)
+    delta = calculer_delta_veille(ancienne_veille, actuels_utiles)
+    terminer_tache(6, details=f"{delta['evolutions_utiles']} évolutions détectées")
+
+    demarrer_tache(7)
+    stats_operateurs = generer_stats_operateurs(resultats_bruts, pertinents + a_verifier + non_pertinents)
+    terminer_tache(7, details=f"{len(stats_operateurs)} opérateurs mesurés")
+
+    print()
+    print("========================================")
+    print("PRIORITÉS 8-10")
+    print("========================================")
+    print(f"Nouveaux pertinents : {len(delta['nouveaux_pertinents'])}")
+    print(f"Promus pertinents : {len(delta['promus_pertinents'])}")
+    print(f"Nouveaux 2027 à vérifier : {len(delta['nouveaux_a_verifier_2027'])}")
+    print(f"Évolutions utiles : {delta['evolutions_utiles']}")
+    print(f"Opérateurs mesurés : {len(stats_operateurs)}")
+
+    demarrer_tache(8)
+    sauvegarde_ok = sauvegarder(pertinents, a_verifier, non_pertinents, resultats_bruts)
+    if sauvegarde_ok:
+        terminer_tache(8, details="CSV principaux + audits enregistrés")
+    else:
+        echouer_tache(8, "Sauvegarde refusée ou aucun résultat")
+
+    demarrer_tache(10)
+    sorties_v10 = executer_sorties_v8_v10(
+        delta, stats_operateurs, pertinents, a_verifier, ia_resultats
     )
+
+    if sorties_v10.get("envoye"):
+        terminer_tache(11, details=sorties_v10.get("raison", ""))
+    else:
+        terminer_tache(11, "TERMINEE", details=sorties_v10.get("raison", ""))
 
     synchronisation_ok = False
 
+    demarrer_tache(9)
     if sauvegarde_ok:
-        synchronisation_ok = synchroniser_excel()
+        try:
+            synchronisation_ok = synchroniser_excel()
+            if synchronisation_ok:
+                terminer_tache(9, details="Classeur Excel mis à jour")
+            else:
+                terminer_tache(9, "ERREUR", details="La synchronisation n'a pas été validée")
+        except Exception as e:
+            echouer_tache(9, str(e))
+    else:
+        terminer_tache(9, "NON EXECUTEE", details="Sauvegarde CSV non validée")
 
+    terminer_tache(10, details="Payload Teams préparé et notification traitée")
+    sauvegarder_suivi_taches()
     duree_total = time.time() - debut_total
 
     print()
@@ -2374,6 +2665,9 @@ def main():
     print("========================================")
     print(f"Erreurs : {erreurs}")
     print(f"Temps total : {duree_total:.1f} secondes")
+    suivi = resume_suivi_taches()
+    print(f"Tâches : {suivi['terminees']}/{suivi['total']} terminées | {suivi['erreurs']} erreur(s) | {suivi['en_cours']} en cours")
+    print(f"Suivi détaillé : {SUIVI_TACHES_JSON}")
     print(
         "Sauvegarde validée : "
         f"{'OUI' if sauvegarde_ok else 'NON'}"
