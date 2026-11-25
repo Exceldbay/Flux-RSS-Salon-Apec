@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# Évite que deux exécutions écrivent simultanément sur main
+concurrency:
+  group: veille-apec-main
+  cancel-in-progress: false
+
 jobs:
   veille-apec:
     runs-on: ubuntu-latest
@@ -134,7 +139,17 @@ jobs:
             echo "ℹ️ Aucun changement à sauvegarder."
           else
             git commit -m "🔄 Mise à jour automatique veille APEC"
-            git push
+
+            echo "🔄 Synchronisation avec origin/main..."
+            git fetch origin main
+
+            # Le runner peut avoir démarré sur un commit légèrement ancien.
+            # On rejoue notre commit au-dessus de la dernière version distante.
+            git rebase origin/main
+
+            echo "🚀 Push vers GitHub..."
+            git push origin HEAD:main
+
             echo "✅ Résultats sauvegardés dans GitHub."
           fi
 
