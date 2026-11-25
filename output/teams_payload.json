@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "25/11/2026 11:29",
+            "text": "25/11/2026 13:14",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -27,7 +27,7 @@
             "facts": [
               {
                 "title": "Nouveaux pertinents",
-                "value": "0"
+                "value": "5"
               },
               {
                 "title": "Promus pertinents",
@@ -43,11 +43,11 @@
               },
               {
                 "title": "Pertinents actuels",
-                "value": "0"
+                "value": "2"
               },
               {
                 "title": "À vérifier actuels",
-                "value": "1"
+                "value": "4"
               },
               {
                 "title": "Tâches terminées",
@@ -64,6 +64,126 @@
             "text": "À regarder en priorité",
             "weight": "Bolder",
             "spacing": "Medium"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Journée Portes Ouvertes - Campus Rodez | 3iL Ingénieurs",
+            "weight": "Bolder",
+            "wrap": true,
+            "spacing": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**NOUVEAU PERTINENT** · dép. 19 · score 56 · 2027 FORTE · 2027-01-23 · 3iL Ingénieurs",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "Ouvrir la source",
+                "url": "https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-campus-rodez/"
+              }
+            ],
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Limoges I Salons & forums 26/27 I Rencontrez l’Université de Limoges, Parc des Expo, Limoges - Unidivers",
+            "weight": "Bolder",
+            "wrap": true,
+            "spacing": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 50 · 2027 MOYENNE · date non précisée · Unidivers",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "Ouvrir la source",
+                "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxNSjJSbUZGRXdvUEpKMUZPYmxVTE9QLVVOYXlyU2MyNlFRVGxPT1BIUlE4R0JlTmE5SGZSZzRfc015aVhCd2JNRFg5WW9RTXd2OXcxZXBXV0pWc1RFRE5haExlUk9kUUstMnhqUlR3UTFRSGFsVE50dUhRSEp4YVREVkM2eElLTTBpQlBkSVFveTZ5MmllVWZYNjktYXMwNW1ScENQWE9KQy12OHNvR0JsaWYtcDVSTDFoVHFqVVV4aURReGVNZ0RtcHlLSnZUNE50OFF3?oc=5"
+              }
+            ],
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Ecole d'ingénieurs Portes Ouvertes, Salons, Evénements | EIGSI La Rochelle",
+            "weight": "Bolder",
+            "wrap": true,
+            "spacing": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**NOUVEAU PERTINENT** · dép. 17 · score 49 · date non précisée · EIGSI",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "Ouvrir la source",
+                "url": "https://www.eigsi.fr/category/rencontrez-nous/"
+              }
+            ],
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Journée Portes ouvertes - Campus Nantes | 3iL Ingénieurs",
+            "weight": "Bolder",
+            "wrap": true,
+            "spacing": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**NOUVEAU PERTINENT** · dép. 19 · score 42 · 2026-11-28 · 3iL Ingénieurs",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "Ouvrir la source",
+                "url": "https://www.3il-ingenieurs.fr/agenda/journees-portes-ouvertes/"
+              }
+            ],
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "Portes Ouvertes & salons - Université de Limoges",
+            "weight": "Bolder",
+            "wrap": true,
+            "spacing": "Small"
+          },
+          {
+            "type": "TextBlock",
+            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 40 · date non précisée · Université de Limoges",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "ActionSet",
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "Ouvrir la source",
+                "url": "https://news.google.com/rss/articles/CBMiTEFVX3lxTE1wTFo2S3JNVTRBOFNzYTVmaDdkWHY5cXg4bEtkWHQxdE5KQlFQTmZRaEx3ZzhzczEwdnRXd3QxV2Z1MFR1VHhBTUs1ZlA?oc=5"
+              }
+            ],
+            "spacing": "None"
           },
           {
             "type": "TextBlock",
@@ -97,28 +217,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 18.0s — 3026 résultats, 0 erreurs",
+            "text": "✅ T01 — Collecte RSS · 38.0s — 2894 résultats, 69 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 131.0s — 488 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 126.0s — 487 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 24.0s — 1137 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage · 29.0s — 1081 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 16 pertinents / 96 à vérifier / 1025 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 16 pertinents / 90 à vérifier / 975 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -132,7 +252,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 777.0s — 111 candidats traités",
+            "text": "✅ T01 — Analyse IA · 540.0s — 99 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -146,21 +266,21 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Statistiques opérateurs — 48 opérateurs mesurés",
+            "text": "✅ T01 — Statistiques opérateurs — 47 opérateurs mesurés",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Sauvegarde CSV — CSV principaux + audits enregistrés",
+            "text": "✅ T01 — Sauvegarde CSV · 1.0s — CSV principaux + audits enregistrés",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Synchronisation Excel — Classeur Excel mis à jour",
+            "text": "✅ T01 — Synchronisation Excel · 1.0s — Classeur Excel mis à jour",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -187,31 +307,31 @@
           },
           {
             "type": "TextBlock",
-            "text": "portes ouvertes — 9 uniques · 0 pertinents · 3 à vérifier",
+            "text": "source:site_officiel — 87 uniques · 3 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "source:site_officiel — 87 uniques · 0 pertinents · 0 à vérifier",
+            "text": "enseignement supérieur — 294 uniques · 3 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "source:openagenda — 390 uniques · 0 pertinents · 0 à vérifier",
+            "text": "salons et forums — 5 uniques · 2 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
+            "text": "\"forum entreprises\" site:unilim.fr — 72 uniques · 2 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "forum recrutement — 4 uniques · 0 pertinents · 0 à vérifier",
+            "text": "portes ouvertes — 7 uniques · 0 pertinents · 3 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -224,7 +344,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "IA : 12 appels · 0 mémoire · 41 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
+            "text": "IA : 15 appels · 2 mémoire · 26 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
             "isSubtle": true,
             "wrap": true,
             "spacing": "Medium"
