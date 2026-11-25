@@ -2459,7 +2459,7 @@ def generer_stats_operateurs(resultats_bruts, actuels):
     return lignes
 
 
-def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_resultats):
+def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, non_pertinents, ia_resultats, resultats_bruts):
     """Génère les fichiers d'audit et, si configuré, la notification Teams."""
     DATA.mkdir(exist_ok=True)
     OUTPUT.mkdir(exist_ok=True)
@@ -2926,7 +2926,7 @@ def main():
 
     demarrer_tache(10)
     sorties_v10 = executer_sorties_v8_v10(
-        delta, stats_operateurs, pertinents, a_verifier, ia_resultats
+        delta, stats_operateurs, pertinents, a_verifier, non_pertinents, ia_resultats, resultats_bruts
     )
 
     terminer_tache(10, details="Payload Teams préparé")
