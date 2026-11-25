@@ -82,20 +82,19 @@ IA_MEMORY_FILE = DATA / "ia_memoire.json"
 IA_MEMORY_VERSION = "v2-global"
 GLOBAL_MEMORY_FILE = DATA / "memoire_veille_globale.json"
 MEMORY_REFRESH_DAYS = int(os.getenv("MEMORY_REFRESH_DAYS", "7"))
+# BDD persistante des candidats déjà analysés
+CANDIDATS_BDD_DIR = DATA / "bdd"
+CANDIDATS_BDD_FILE = CANDIDATS_BDD_DIR / "candidats_analyses.json"
+CANDIDATS_BDD_VERSION = "v1"
+# Historique des runs précédentes : utilisé pour enrichir/amorcer la BDD
+# sans relancer automatiquement les recherches ou Gemini.
+HISTORIQUE_RUNS_DIR = OUTPUT
+HISTORIQUE_MAX_FICHIERS = int(os.getenv("HISTORIQUE_MAX_FICHIERS", "100"))
+HISTORIQUE_MAX_LIGNES_PAR_FICHIER = int(os.getenv("HISTORIQUE_MAX_LIGNES_PAR_FICHIER", "5000"))
+
+
 SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
 SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
-
-# ============================================================
-# ARCHIVAGE DES RECHERCHES
-# ============================================================
-# Les recherches brutes et les recherches approfondies sont isolées
-# du reste des sorties. Une mémoire dédiée empêche d'ajouter plusieurs
-# fois exactement la même recherche.
-RECHERCHES_DIR = DATA / "recherches"
-RECHERCHES_RSS_DIR = RECHERCHES_DIR / "rss"
-RECHERCHES_APPROFONDIES_DIR = RECHERCHES_DIR / "approfondies"
-MEMOIRE_RECHERCHES_FILE = RECHERCHES_DIR / "recherches_analysees.json"
-MEMOIRE_APPROFONDIES_FILE = RECHERCHES_DIR / "recherches_approfondies_analysees.json"
 
 MAX_WORKERS = 16
 TIMEOUT = 10
@@ -263,7 +262,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-25-v20-recherches-separees-memoire"
+VERSION_PROGRAMME = "2026-11-25-v23-bdd-historique-teams-diagnostic"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -1154,138 +1153,6 @@ def _signature_memoire(resultat):
     }
     brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(brut.encode("utf-8")).hexdigest()
-
-
-
-def _empreinte_recherche(resultat):
-    """Identifie une recherche indépendamment de son ordre dans le flux."""
-    base = {
-        "url": canoniser_url(
-            resultat.get("url")
-            or resultat.get("url_reelle")
-            or resultat.get("url_finale")
-        ),
-        "titre": normaliser(
-            resultat.get("titre_page")
-            or resultat.get("titre")
-            or ""
-        ),
-        "description": normaliser(resultat.get("description", ""))[:5000],
-        "departement": str(resultat.get("departement", "")).strip(),
-        "annee": str(
-            resultat.get("annee_detectee")
-            or resultat.get("annee_recherchee")
-            or ""
-        ).strip(),
-        "source": normaliser(resultat.get("source", "")),
-    }
-    brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(brut.encode("utf-8")).hexdigest()
-
-
-def _charger_index_recherches(path):
-    """Charge l'index des recherches déjà archivées."""
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("items"), dict):
-            return data["items"]
-    except Exception as e:
-        print(f"⚠️ Index de recherches illisible ({path.name}) : {type(e).__name__} : {e}")
-    return {}
-
-
-def _sauvegarder_index_recherches(path, index):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "version": "v1",
-                "updated_at": datetime.now().isoformat(timespec="seconds"),
-                "items": index,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-
-def archiver_recherches_uniques(resultats, type_recherche="rss"):
-    """
-    Archive uniquement les recherches jamais archivées auparavant.
-
-    type_recherche:
-      - rss : résultats de recherche/collecte
-      - approfondie : résultats après recherche approfondie de la page
-    """
-    if not resultats:
-        return {"nouveaux": 0, "deja_connus": 0, "fichier": ""}
-
-    if type_recherche == "approfondie":
-        dossier = RECHERCHES_APPROFONDIES_DIR
-        index_path = MEMOIRE_APPROFONDIES_FILE
-        prefixe = "approfondies"
-    else:
-        dossier = RECHERCHES_RSS_DIR
-        index_path = MEMOIRE_RECHERCHES_FILE
-        prefixe = "recherches"
-
-    dossier.mkdir(parents=True, exist_ok=True)
-    index = _charger_index_recherches(index_path)
-
-    nouveaux = []
-    deja_connus = 0
-    maintenant = datetime.now().isoformat(timespec="seconds")
-
-    for resultat in resultats:
-        if not isinstance(resultat, dict):
-            continue
-
-        empreinte = _empreinte_recherche(resultat)
-        if not empreinte:
-            continue
-
-        if empreinte in index:
-            deja_connus += 1
-            continue
-
-        # On copie le résultat pour ne jamais modifier le résultat traité.
-        copie = dict(resultat)
-        nouveaux.append(copie)
-        index[empreinte] = {
-            "date_premiere_analyse": maintenant,
-            "titre": copie.get("titre_page") or copie.get("titre", ""),
-            "url": canoniser_url(
-                copie.get("url")
-                or copie.get("url_reelle")
-                or copie.get("url_finale")
-            ),
-            "departement": copie.get("departement", ""),
-            "annee": copie.get("annee_detectee") or copie.get("annee_recherchee", ""),
-        }
-
-    fichier = ""
-    if nouveaux:
-        fichier_path = dossier / f"{prefixe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        fichier_path.write_text(
-            json.dumps(nouveaux, ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
-        fichier = str(fichier_path)
-
-    _sauvegarder_index_recherches(index_path, index)
-
-    print(
-        f"🗂️ Recherches {type_recherche} : "
-        f"{len(nouveaux)} nouvelles archivées / {deja_connus} déjà analysées"
-    )
-    return {
-        "nouveaux": len(nouveaux),
-        "deja_connus": deja_connus,
-        "fichier": fichier,
-    }
 
 
 def _cle_memoire_globale(resultat):
@@ -2372,39 +2239,28 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
 
     candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
 
+    # 0) BDD persistante : les candidats déjà analysés et inchangés sont
+    # restaurés directement et ne repassent pas dans les recherches/IA.
+    candidats_nouveaux_bdd, candidats_modifies_bdd, candidats_reutilises_bdd = classifier_candidats_bdd(
+        candidats, bdd_candidats
+    )
+    candidats_bdd_a_analyser = candidats_nouveaux_bdd + candidats_modifies_bdd
+
     # 1) Mémoire globale : seuls les nouveaux/modifiés/à rafraîchir passent
     # dans les trois recherches lourdes.
     memoire_globale = charger_memoire_globale()
-    candidats_a_verifier, _ = appliquer_memoire_globale(candidats, memoire_globale)
+    candidats_a_verifier, _ = appliquer_memoire_globale(candidats_bdd_a_analyser, memoire_globale)
     # 2) Mémoire IA détaillée : réutilisation des enrichissements déjà connus.
     candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats_a_verifier, memoire_ia)
     enrichir_candidats_ia(candidats_a_traiter)
-
-    # Archivage séparé des recherches approfondies.
-    # Seuls les résultats réellement nouveaux/modifiés sont ajoutés.
-    try:
-        stats_archivage_approfondi = archiver_recherches_uniques(
-            candidats_a_traiter,
-            type_recherche="approfondie",
-        )
-        print(
-            f"📁 Dossier recherches approfondies : {RECHERCHES_APPROFONDIES_DIR} | "
-            f"nouvelles={stats_archivage_approfondi['nouveaux']} | "
-            f"déjà analysées={stats_archivage_approfondi['deja_connus']}"
-        )
-    except Exception as e:
-        print(
-            f"⚠️ Archivage des recherches approfondies non généré : "
-            f"{type(e).__name__} : {e}"
-        )
-
     for candidat in candidats_a_traiter:
         try:
             candidat.update(calculer_score(candidat))
         except Exception:
             pass
 
-    ia_resultats = list(candidats_memorises)
+    # Les candidats déjà analysés par la BDD sont déjà des résultats finaux.
+    ia_resultats = list(candidats_reutilises_bdd) + list(candidats_memorises)
     quota_bloque = False
     erreurs_consecutives = 0
     appels_31 = 0
@@ -2416,7 +2272,8 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
     print("========================================")
     print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
     print(f"Candidats après filtre : {len(candidats)}")
-    print(f"Réutilisés depuis mémoire : {len(candidats_memorises)}")
+    print(f"BDD : {len(candidats_reutilises_bdd)} déjà analysés / {len(candidats_nouveaux_bdd)} nouveaux / {len(candidats_modifies_bdd)} modifiés")
+    print(f"Réutilisés depuis mémoire IA : {len(candidats_memorises)}")
     print(f"Nouveaux/modifiés à analyser : {len(candidats_a_traiter)}")
     print("Gemini 3.1 Flash Lite : nouveaux/modifiés uniquement | cooldown 10 s")
     print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} nouveaux/modifiés | cooldown 60 s")
@@ -2552,8 +2409,19 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
     print()
     print(f"Analyses Gemini 3.1 effectuées cette run : {appels_31}")
     print(f"Enrichissements Gemini 3.8 effectués cette run : {appels_38}/{MAX_IA_38}")
+    print(f"Réutilisations mémoire BDD : {len(candidats_reutilises_bdd)}")
     print(f"Réutilisations mémoire IA : {len(candidats_memorises)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
+
+    # Persistance : uniquement les candidats effectivement analysés cette run.
+    # Les candidats interrompus par une erreur restent donc retraitables.
+    a_persister = [
+        r for r in ia_resultats
+        if r.get("bdd_reutilise") is not True
+        and (r.get("ia_analyse") == "OUI" or r.get("memoire_ia") == "OUI")
+    ]
+    if a_persister:
+        enregistrer_candidats_bdd(a_persister, bdd_candidats)
     print(
         "Décisions finales : "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinents / "
@@ -2787,8 +2655,6 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, non
     """Génère les fichiers d'audit et, si configuré, la notification Teams."""
     DATA.mkdir(exist_ok=True)
     OUTPUT.mkdir(exist_ok=True)
-    RECHERCHES_RSS_DIR.mkdir(parents=True, exist_ok=True)
-    RECHERCHES_APPROFONDIES_DIR.mkdir(parents=True, exist_ok=True)
     lignes_delta = []
     for type_delta, groupe in (
         ("nouveau_pertinent", delta["nouveaux_pertinents"]),
@@ -2855,7 +2721,16 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, non
     card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
     resultat_teams = envoyer_teams(card, DATA / "teams_last_sent.txt")
+    try:
+        (OUTPUT / "teams_result.json").write_text(
+            json.dumps(resultat_teams, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+    except Exception as exc:
+        print(f"⚠️ Diagnostic Teams non sauvegardé : {type(exc).__name__}: {exc}")
     print(f"Teams : {'OUI' if resultat_teams['envoye'] else 'NON'} — {resultat_teams['raison']}")
+    if resultat_teams.get("diagnostic"):
+        print(f"Teams diagnostic : {json.dumps(resultat_teams['diagnostic'], ensure_ascii=False)}")
     return resultat_teams
 
 # ============================================================
@@ -3052,7 +2927,406 @@ def sauvegarder(
 # MAIN
 # ============================================================
 
+
+# ---------------------------------------------------------------------------
+# BDD PERSISTANTE DES CANDIDATS
+# ---------------------------------------------------------------------------
+
+def _normaliser_cle_candidat(valeur):
+    return re.sub(r"\s+", " ", str(valeur or "").strip().lower())
+
+def _cle_stable_candidat(resultat):
+    """
+    Identifiant stable :
+    - URL canonique si disponible
+    - sinon titre + département + année
+    """
+    url = (
+        resultat.get("url_finale")
+        or resultat.get("url_reelle")
+        or resultat.get("url")
+        or ""
+    ).strip()
+    if url:
+        return "url:" + _normaliser_cle_candidat(url)
+
+    titre = _normaliser_cle_candidat(resultat.get("titre"))
+    dept = _normaliser_cle_candidat(
+        resultat.get("departement") or resultat.get("departement_numero")
+    )
+    annee = _normaliser_cle_candidat(
+        resultat.get("annee_detectee") or resultat.get("annee_recherchee")
+    )
+    return "fallback:" + "|".join((titre, dept, annee))
+
+def _signature_source_candidat(resultat):
+    """
+    Empreinte des données disponibles avant analyse approfondie.
+    Elle sert à détecter une modification réelle du candidat.
+    """
+    champs = (
+        "titre", "url", "url_reelle", "url_finale", "source", "description",
+        "date_publication", "departement", "nom_departement",
+        "annee_recherchee", "annee_detectee", "categorie", "mot_cle",
+        "complement", "lieu", "operateur_web", "famille_operateur",
+    )
+    payload = {k: _normaliser_cle_candidat(resultat.get(k)) for k in champs}
+    brut = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+def _signature_contenu_candidat(resultat):
+    """
+    Empreinte enrichie. Les champs de page sont inclus lorsqu'ils existent.
+    """
+    champs = (
+        "titre", "url_finale", "description", "date_publication",
+        "date_evenement_page", "lieu_page", "organisateur_page",
+        "extrait_page", "contenu_page", "page_enrichie",
+    )
+    payload = {k: _normaliser_cle_candidat(resultat.get(k)) for k in champs}
+    brut = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+def _charger_bdd_candidats():
+    CANDIDATS_BDD_DIR.mkdir(parents=True, exist_ok=True)
+    if not CANDIDATS_BDD_FILE.exists():
+        return {"version": CANDIDATS_BDD_VERSION, "updated_at": "", "items": {}}
+    try:
+        data = json.loads(CANDIDATS_BDD_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("BDD invalide")
+        data.setdefault("version", CANDIDATS_BDD_VERSION)
+        data.setdefault("updated_at", "")
+        data.setdefault("items", {})
+        return data
+    except Exception as exc:
+        print(f"⚠️ BDD candidats illisible : {exc} — nouvelle BDD utilisée")
+        return {"version": CANDIDATS_BDD_VERSION, "updated_at": "", "items": {}}
+
+def _sauvegarder_bdd_candidats(bdd):
+    CANDIDATS_BDD_DIR.mkdir(parents=True, exist_ok=True)
+    bdd["version"] = CANDIDATS_BDD_VERSION
+    bdd["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    tmp = CANDIDATS_BDD_FILE.with_suffix(".tmp")
+    tmp.write_text(
+        json.dumps(bdd, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    tmp.replace(CANDIDATS_BDD_FILE)
+
+def _restaurer_resultat_bdd(resultat, entree):
+    """
+    Réinjecte les résultats précédemment calculés sans relancer
+    enrichissement, scoring ou IA.
+    """
+    champs = entree.get("resultat", {})
+    if isinstance(champs, dict):
+        resultat.update(champs)
+    resultat["bdd_candidat_connu"] = True
+    resultat["bdd_reutilise"] = True
+    resultat["bdd_modifie"] = False
+    resultat["date_derniere_analyse"] = entree.get("last_analyzed", "")
+    resultat["nombre_de_reanalyses"] = entree.get("analysis_count", 1)
+    resultat["contenu_modifie"] = False
+    return resultat
+
+def classifier_candidats_bdd(resultats, bdd):
+    """
+    Sépare strictement :
+    - nouveaux candidats
+    - candidats modifiés
+    - candidats déjà analysés et inchangés
+
+    Les candidats déjà analysés sont restaurés depuis la BDD et ne doivent
+    pas repasser dans les recherches approfondies / Gemini.
+    """
+    nouveaux = []
+    modifies = []
+    reutilises = []
+    items = bdd.setdefault("items", {})
+
+    for resultat in resultats:
+        cle = _cle_stable_candidat(resultat)
+        sig_source = _signature_source_candidat(resultat)
+        entree = items.get(cle)
+
+        resultat["bdd_cle"] = cle
+        resultat["bdd_signature_source"] = sig_source
+
+        if not entree:
+            resultat["bdd_candidat_connu"] = False
+            resultat["bdd_reutilise"] = False
+            resultat["bdd_modifie"] = False
+            nouveaux.append(resultat)
+            continue
+
+        ancienne_sig = entree.get("signature_source", "")
+        if ancienne_sig == sig_source:
+            reutilises.append(_restaurer_resultat_bdd(resultat, entree))
+        else:
+            resultat["bdd_candidat_connu"] = True
+            resultat["bdd_reutilise"] = False
+            resultat["bdd_modifie"] = True
+            resultat["contenu_modifie"] = True
+            modifies.append(resultat)
+
+    print(
+        f"🗃️ BDD candidats : {len(nouveaux)} nouveaux | "
+        f"{len(modifies)} modifiés | {len(reutilises)} réutilisés"
+    )
+    return nouveaux, modifies, reutilises
+
+def enregistrer_candidats_bdd(resultats, bdd):
+    """
+    Enregistre uniquement les candidats qui ont effectivement terminé leur
+    analyse. Les erreurs non analysées ne sont donc pas figées en BDD.
+    """
+    items = bdd.setdefault("items", {})
+    now = datetime.now().isoformat(timespec="seconds")
+
+    for resultat in resultats:
+        cle = resultat.get("bdd_cle") or _cle_stable_candidat(resultat)
+        entree = items.get(cle, {})
+        ancienne_signature = entree.get("signature_source", "")
+        analyse_count = int(entree.get("analysis_count", 0) or 0) + 1
+
+        # Ne pas stocker de références internes ou données de contrôle inutiles
+        resultat_stocke = dict(resultat)
+        entree.update({
+            "signature_source": resultat.get("bdd_signature_source")
+                or _signature_source_candidat(resultat),
+            "signature_contenu": _signature_contenu_candidat(resultat),
+            "first_seen": entree.get("first_seen", now),
+            "last_seen": now,
+            "last_analyzed": now,
+            "analysis_count": analyse_count,
+            "contenu_modifie": bool(
+                ancienne_signature
+                and ancienne_signature != resultat.get("bdd_signature_source")
+            ),
+            "status": resultat.get("decision_ia")
+                or resultat.get("statut_final")
+                or resultat.get("statut")
+                or "",
+            "resultat": resultat_stocke,
+        })
+        items[cle] = entree
+
+    _sauvegarder_bdd_candidats(bdd)
+
+def preparer_bdd_candidats():
+    CANDIDATS_BDD_DIR.mkdir(parents=True, exist_ok=True)
+    return _charger_bdd_candidats()
+
+
+
+# ---------------------------------------------------------------------------
+# IMPORT DE L'HISTORIQUE DES RUNS
+# ---------------------------------------------------------------------------
+
+def _lire_json_historique(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            if isinstance(data.get("items"), dict):
+                return list(data["items"].values())
+            return [data]
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+def _lire_csv_historique(path):
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            return [dict(row) for _, row in zip(range(HISTORIQUE_MAX_LIGNES_PAR_FICHIER), reader)]
+    except Exception:
+        return []
+
+def _normaliser_historique_resultat(row):
+    """
+    Convertit une ligne historique en candidat exploitable par la BDD.
+    Les informations historiques sont conservées, mais aucune analyse IA
+    n'est déclenchée par cet import.
+    """
+    if not isinstance(row, dict):
+        return None
+
+    # Certains historiques peuvent avoir encapsulé le résultat.
+    resultat = dict(row.get("resultat", row))
+    if not isinstance(resultat, dict):
+        return None
+
+    # Ne pas créer d'entrées sans identité exploitable.
+    if not (
+        resultat.get("url")
+        or resultat.get("url_reelle")
+        or resultat.get("url_finale")
+        or resultat.get("titre")
+    ):
+        return None
+
+    return resultat
+
+def importer_historique_runs_dans_bdd(bdd):
+    """
+    Analyse les fichiers produits par les runs précédentes présents dans
+    output/ et data/. L'objectif est de récupérer le maximum d'informations
+    déjà calculées : scores, décisions, enrichissements, dates, sources,
+    statuts et résultats Gemini.
+
+    Cet import est une opération de mémoire : il ne lance ni HTTP ni Gemini.
+    Les fichiers les plus récents sont prioritaires.
+    """
+    fichiers = []
+
+    # Résultats persistants principaux
+    for base in (DATA, OUTPUT):
+        if base.exists():
+            for pattern in (
+                "resultats_*.csv",
+                "resultats_*.json",
+                "journal_recherche_*.csv",
+                "journal_recherche_*.json",
+            ):
+                fichiers.extend(base.glob(pattern))
+
+    # Archives de recherches déjà créées
+    for base in (
+        DATA / "recherches" / "rss",
+        DATA / "recherches" / "approfondies",
+    ):
+        if base.exists():
+            fichiers.extend(base.glob("*.json"))
+            fichiers.extend(base.glob("*.csv"))
+
+    fichiers = sorted(
+        {f for f in fichiers if f.is_file()},
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    )[:HISTORIQUE_MAX_FICHIERS]
+
+    items = bdd.setdefault("items", {})
+    importes = 0
+    enrichis = 0
+    ignores = 0
+
+    # Champs historiques utiles qui peuvent compléter une entrée BDD.
+    champs_prioritaires = {
+        k for k in (
+            "titre", "url", "url_reelle", "url_finale", "source",
+            "description", "date_publication", "departement",
+            "nom_departement", "annee_recherchee", "annee_detectee",
+            "categorie_numero", "categorie", "mot_cle", "complement",
+            "lieu", "operateur_web", "famille_operateur",
+            "score", "score_cible_apec", "score_emploi", "score_formation",
+            "score_superieur", "score_apec", "score_entreprise",
+            "score_qualifie", "score_geographie", "score_date",
+            "score_bruit", "score_complementaire", "bonus_titre",
+            "details_score", "statut", "statut_final", "decision_ia",
+            "confiance_ia", "raison_ia", "modele_ia", "modele_ia_1",
+            "decision_ia_1", "confiance_ia_1", "raison_ia_1",
+            "modele_ia_2", "decision_ia_2", "confiance_ia_2",
+            "raison_ia_2", "modele_ia_31", "decision_ia_31",
+            "confiance_ia_31", "raison_ia_31", "modele_ia_38",
+            "decision_ia_38", "confiance_ia_38", "raison_ia_38",
+            "enrichissement_38", "page_enrichie", "titre_page",
+            "description_page", "extrait_page", "date_evenement_page",
+            "lieu_page", "organisateur_page", "evenement_detecte",
+            "preuve_evenement", "geographie_verifiee", "hors_perimetre",
+            "hors_geographie", "priorite_2027", "niveau_source_v9",
+        )
+    }
+
+    for fichier in fichiers:
+        if fichier.name == CANDIDATS_BDD_FILE.name:
+            continue
+
+        lignes = (
+            _lire_csv_historique(fichier)
+            if fichier.suffix.lower() == ".csv"
+            else _lire_json_historique(fichier)
+        )
+
+        for ligne in lignes:
+            resultat = _normaliser_historique_resultat(ligne)
+            if not resultat:
+                ignores += 1
+                continue
+
+            cle = _cle_stable_candidat(resultat)
+            sig = _signature_source_candidat(resultat)
+            now = datetime.fromtimestamp(
+                fichier.stat().st_mtime
+            ).isoformat(timespec="seconds")
+
+            entree = items.get(cle)
+            donnees = {
+                k: resultat.get(k)
+                for k in champs_prioritaires
+                if k in resultat and str(resultat.get(k, "")).strip() != ""
+            }
+
+            if entree is None:
+                items[cle] = {
+                    "signature_source": sig,
+                    "signature_contenu": _signature_contenu_candidat(resultat),
+                    "first_seen": now,
+                    "last_seen": now,
+                    "last_analyzed": now,
+                    "analysis_count": 1,
+                    "status": (
+                        resultat.get("decision_ia")
+                        or resultat.get("statut_final")
+                        or resultat.get("statut")
+                        or ""
+                    ),
+                    "source_historique": fichier.name,
+                    "resultat": donnees,
+                }
+                importes += 1
+            else:
+                # On enrichit l'entrée existante sans écraser une information
+                # plus récente par une ligne historique plus ancienne.
+                cible = entree.setdefault("resultat", {})
+                for k, v in donnees.items():
+                    if str(v).strip() and not str(cible.get(k, "")).strip():
+                        cible[k] = v
+                        enrichis += 1
+
+                # Une ancienne analyse valide est conservée.
+                if not entree.get("signature_source"):
+                    entree["signature_source"] = sig
+                entree.setdefault("first_seen", now)
+                entree.setdefault("last_seen", now)
+                entree.setdefault("last_analyzed", now)
+                entree.setdefault("analysis_count", 1)
+
+    if importes or enrichis:
+        _sauvegarder_bdd_candidats(bdd)
+
+    print(
+        f"📚 Historique des runs : {len(fichiers)} fichiers inspectés | "
+        f"{importes} candidats importés | {enrichis} informations complémentaires | "
+        f"{ignores} lignes ignorées",
+        flush=True,
+    )
+    return {
+        "fichiers": len(fichiers),
+        "importes": importes,
+        "enrichis": enrichis,
+        "ignores": ignores,
+    }
+
+
 def main():
+    bdd_candidats = preparer_bdd_candidats()
+    stats_historique_runs = importer_historique_runs_dans_bdd(bdd_candidats)
+    stats_bdd_candidats = {
+        "taille_avant_run": len(bdd_candidats.get("items", {}))
+    }
     global meta_resultats
 
     debut_total = time.time()
@@ -3135,21 +3409,6 @@ def main():
         print(f"⚠️ Journal de recherche non généré : {type(e).__name__} : {e}")
 
     resultats_bruts = externes + resultats_bruts
-
-    # Archivage séparé des recherches : les résultats déjà analysés
-    # ne sont pas réajoutés dans le dossier historique.
-    try:
-        stats_archivage_rss = archiver_recherches_uniques(
-            resultats_bruts,
-            type_recherche="rss",
-        )
-        print(
-            f"📁 Dossier recherches RSS : {RECHERCHES_RSS_DIR} | "
-            f"nouvelles={stats_archivage_rss['nouveaux']} | "
-            f"déjà analysées={stats_archivage_rss['deja_connus']}"
-        )
-    except Exception as e:
-        print(f"⚠️ Archivage des recherches RSS non généré : {type(e).__name__} : {e}")
 
     print()
     print("========================================")
