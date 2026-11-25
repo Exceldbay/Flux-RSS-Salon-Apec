@@ -126,12 +126,23 @@ jobs:
           git add data/ output/ 2>/dev/null || true
 
           if git diff --cached --quiet; then
-            echo "ℹ️ Aucun changement à sauvegarder."
-          else
-            git commit -m "🔄 Mise à jour automatique veille APEC"
+                      echo "🔄 Synchronisation robuste avec origin/main..."
             git fetch origin main
-            git rebase origin/main
+
+            # Les fichiers générés par la veille peuvent être modifiés
+            # simultanément sur GitHub. On évite le rebase, qui provoque
+            # des conflits difficiles à résoudre sur XLSX/CSV/JSON.
+            # En cas de conflit, les résultats produits par ce run sont conservés.
+            echo "🔀 Fusion de la dernière version distante..."
+            git merge --no-edit -X ours origin/main || {
+              echo "❌ Échec de la fusion automatique."
+              git status --short
+              exit 1
+            }
+
+            echo "🚀 Push vers GitHub..."
             git push origin HEAD:main
+
             echo "✅ Résultats sauvegardés dans GitHub."
           fi
 
