@@ -74,6 +74,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "config"
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
+IA_MEMORY_FILE = DATA / "ia_memoire.json"
+IA_MEMORY_VERSION = "v1"
 
 MAX_WORKERS = 16
 TIMEOUT = 10
@@ -241,7 +243,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-24-v10-delta-teams"
+VERSION_PROGRAMME = "2026-11-25-v16-memoire-ia-teams"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -1103,6 +1105,135 @@ def extraire_texte_page(soup, limite=2500):
     return " ".join(texte.split())[:limite]
 
 
+
+def _signature_memoire(resultat):
+    """Signature du contenu entrant AVANT enrichissement de la page.
+
+    On ne met volontairement pas les champs issus de l'enrichissement HTTP
+    dans la signature : sinon une page déjà enrichie ne pourrait jamais être
+    reconnue au lancement suivant, puisque ces champs sont absents au départ.
+    """
+    base = {
+        # L'URL RSS/origine est privilégiée car elle reste stable même si la
+        # redirection finale du site change.
+        "url": canoniser_url(resultat.get("url") or resultat.get("url_reelle") or resultat.get("url_finale")),
+        "titre": normaliser(resultat.get("titre", "")),
+        "description": normaliser(resultat.get("description", ""))[:5000],
+        "date_publication": str(resultat.get("date_publication", "")),
+        "departement": str(resultat.get("departement", "")),
+        "annee_recherchee": str(resultat.get("annee_recherchee", "")),
+        "annee_detectee": str(resultat.get("annee_detectee", "")),
+        "source": normaliser(resultat.get("source", "")),
+    }
+    brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+
+def charger_memoire_ia():
+    """Charge la mémoire des enrichissements IA des runs précédentes."""
+    if not IA_MEMORY_FILE.exists():
+        return {}
+    try:
+        data = json.loads(IA_MEMORY_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        if data.get("version") != IA_MEMORY_VERSION:
+            return {}
+        return data.get("items", {}) if isinstance(data.get("items", {}), dict) else {}
+    except Exception as e:
+        print(f"⚠️ Mémoire IA illisible : {type(e).__name__} : {e}")
+        return {}
+
+
+def sauvegarder_memoire_ia(resultats, ancienne_memoire=None):
+    """Sauvegarde les enrichissements 3.1/3.8 et les données de page.
+
+    La mémoire est cumulative : une run ne supprime pas les événements vus
+    précédemment. Cela permet de reconnaître un événement lorsqu'il ressort
+    d'un flux plusieurs jours plus tard.
+    """
+    memoire = dict(ancienne_memoire or {})
+    champs_page = [
+        "url_finale", "url_reelle", "titre_page", "description_page",
+        "extrait_page", "date_evenement_page", "lieu_page",
+        "organisateur_page", "page_enrichie", "erreur_enrichissement",
+    ]
+    champs_ia = [
+        "modele_ia_1", "decision_ia_1", "confiance_ia_1", "raison_ia_1",
+        "modele_ia_2", "decision_ia_2", "confiance_ia_2", "raison_ia_2",
+        "modele_ia_31", "decision_ia_31", "confiance_ia_31", "raison_ia_31",
+        "modele_ia_38", "decision_ia_38", "confiance_ia_38", "raison_ia_38",
+        "enrichissement_38", "escalade_38", "motif_escalade_38",
+        "decision_ia", "confiance_ia", "raison_ia", "categorie_ia",
+        "date_ia", "departement_ia", "erreur_ia_type", "geographie_corrigee",
+        "statut_final", "ia_analyse", "modele_ia",
+    ]
+    for r in resultats:
+        if not isinstance(r, dict):
+            continue
+        if r.get("ia_analyse") not in {"OUI", "MEMOIRE"} and not r.get("modele_ia_1"):
+            continue
+        key = _cle_memoire_evenement(r)
+        if not key:
+            continue
+        item = {
+            "signature": _signature_memoire(r),
+            "date_memorisation": datetime.now().isoformat(),
+            "titre": r.get("titre", ""),
+            "url": r.get("url", ""),
+            "departement": r.get("departement", ""),
+            "page": {k: r.get(k, "") for k in champs_page},
+            "ia": {k: r.get(k, "") for k in champs_ia if k in r},
+        }
+        memoire[key] = item
+    IA_MEMORY_FILE.parent.mkdir(exist_ok=True)
+    IA_MEMORY_FILE.write_text(
+        json.dumps({"version": IA_MEMORY_VERSION, "updated_at": datetime.now().isoformat(), "items": memoire}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return memoire
+
+
+def _cle_memoire_evenement(resultat):
+    """Clé persistante : URL canonique prioritaire, sinon titre+département+année."""
+    url = canoniser_url(resultat.get("url") or resultat.get("url_reelle") or resultat.get("url_finale"))
+    if url:
+        return "url:" + url
+    titre = cle_titre_evenement(resultat.get("titre_page") or resultat.get("titre"))
+    dept = str(resultat.get("departement", "")).strip()
+    annee = str(resultat.get("annee_detectee") or resultat.get("annee_recherchee") or "").strip()
+    if titre:
+        return f"titre:{dept}:{annee}:{titre}"
+    return ""
+
+
+def appliquer_memoire_ia(candidats, memoire):
+    """Réinjecte les enrichissements déjà connus et retourne les candidats à traiter."""
+    reutilises = []
+    a_traiter = []
+    for r in candidats:
+        key = _cle_memoire_evenement(r)
+        item = memoire.get(key) if key else None
+        signature = _signature_memoire(r)
+        if item and item.get("signature") == signature:
+            for k, v in (item.get("page") or {}).items():
+                if v not in ("", None):
+                    r[k] = v
+            for k, v in (item.get("ia") or {}).items():
+                if v not in ("", None):
+                    r[k] = v
+            r["ia_analyse"] = "MEMOIRE"
+            r["memoire_ia"] = "OUI"
+            r["date_ia_memoire"] = item.get("date_memorisation", "")
+            r["statut_final"] = r.get("statut_final") or r.get("statut", "À vérifier")
+            reutilises.append(r)
+        else:
+            r["memoire_ia"] = "NON"
+            a_traiter.append(r)
+    print(f"🧠 Mémoire IA : {len(reutilises)} enrichissements réutilisés / {len(candidats)} candidats")
+    print(f"🆕 À enrichir/analyser réellement : {len(a_traiter)}")
+    return a_traiter, reutilises
+
 def enrichir_page(resultat):
     """
     Récupère des informations complémentaires sur la page source.
@@ -1235,8 +1366,12 @@ def enrichir_candidats_ia(candidats):
     print(f"Candidats à enrichir : {len(candidats)}")
 
     debut = time.time()
-    cible = candidats
+    cible = [r for r in candidats if str(r.get("page_enrichie", "")).upper() != "OUI"]
     decoder_liens_google(cible)
+
+    if not cible:
+        print("Toutes les pages candidates sont déjà présentes en mémoire : aucun nouvel enrichissement HTTP.")
+        return candidats
 
     with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
         futures = [executor.submit(enrichir_page, resultat) for resultat in cible]
@@ -1878,13 +2013,16 @@ def classer_statut_final(resultat, decision):
 # COUCHE IA GEMINI
 # ============================================================
 
-def appliquer_ia(pertinents, a_verifier):
-    """Cascade IA : tous les candidats passent par 3.1, top 5 ré-enrichis par 3.8."""
+def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
+    """Cascade IA avec mémoire persistante : 3.1 uniquement pour les nouveautés.
+
+    Les événements identiques déjà enrichis lors d'une run précédente sont
+    réutilisés sans appel HTTP de page, sans appel Gemini 3.1 et sans appel
+    Gemini 3.8. Les nouveaux/modifiés passent dans la cascade normale.
+    """
+    memoire_ia = memoire_ia or {}
     tous_candidats = pertinents + a_verifier
 
-    # Premier filtre Python : score positif suffisant + périmètre géographique strict.
-    # Les scores négatifs ne comptent jamais dans le volume IA et les résultats
-    # explicitement hors périmètre sont retirés avant tout appel Gemini.
     candidats = []
     non_eligibles = []
     hors_perimetre = []
@@ -1932,48 +2070,49 @@ def appliquer_ia(pertinents, a_verifier):
             non_eligibles.append(candidat)
 
     candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
-    enrichir_candidats_ia(candidats)
-    for candidat in candidats:
+
+    # 1) Réutilisation de la mémoire AVANT tout enrichissement HTTP/Gemini.
+    candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats, memoire_ia)
+    enrichir_candidats_ia(candidats_a_traiter)
+    for candidat in candidats_a_traiter:
         try:
             candidat.update(calculer_score(candidat))
         except Exception:
             pass
 
-    ia_resultats = []
-    nouveaux_pertinents = []
-    nouveaux_a_verifier = []
+    ia_resultats = list(candidats_memorises)
     quota_bloque = False
     erreurs_consecutives = 0
+    appels_31 = 0
+    appels_38 = 0
 
     print()
     print("========================================")
-    print("COUCHE IA GEMINI — CASCADE 3.1 → 3.8")
+    print("COUCHE IA GEMINI — CASCADE 3.1 → 3.8 + MÉMOIRE")
     print("========================================")
     print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
-    print(f"Candidats ayant passé le filtre : {len(candidats)}")
-    print(f"Exclus IA pour score négatif / insuffisant : {len(non_eligibles)}")
-    print(f"Retirés pour hors périmètre géographique : {len(hors_perimetre)}")
-    print("Gemini 3.1 Flash Lite : TOUS les candidats | cooldown 10 s")
-    print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} | ré-enrichissement | cooldown 60 s")
+    print(f"Candidats après filtre : {len(candidats)}")
+    print(f"Réutilisés depuis mémoire : {len(candidats_memorises)}")
+    print(f"Nouveaux/modifiés à analyser : {len(candidats_a_traiter)}")
+    print("Gemini 3.1 Flash Lite : nouveaux/modifiés uniquement | cooldown 10 s")
+    print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} nouveaux/modifiés | cooldown 60 s")
     print(flush=True)
 
     dernier_appel_31 = 0.0
-
-    # ========================================================
-    # ÉTAPE 1 — TOUS les candidats -> Gemini 3.1 Flash Lite
-    # ========================================================
-    for position, resultat in enumerate(candidats, 1):
+    for position, resultat in enumerate(candidats_a_traiter, 1):
         if dernier_appel_31:
             attente = COOLDOWN_31_SECONDS - (time.time() - dernier_appel_31)
             if attente > 0:
                 time.sleep(attente)
 
-        print(f"[IA 3.1] {position}/{len(candidats)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
+        print(f"[IA 3.1] {position}/{len(candidats_a_traiter)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
         analyse = analyser_resultat_31(resultat)
         dernier_appel_31 = time.time()
+        appels_31 += 1
 
         resultat.update(analyse)
         resultat["ia_analyse"] = "OUI"
+        resultat["memoire_ia"] = "NON"
         resultat["modele_ia_1"] = "gemini-3.1-flash-lite"
         resultat["decision_ia_1"] = analyse.get("decision_ia", "IA_INDISPONIBLE")
         resultat["confiance_ia_1"] = analyse.get("confiance_ia", 0)
@@ -1989,7 +2128,7 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["raison_ia"] = (str(resultat.get("raison_ia", "")) + " | Conflit de département avec Python : vérification requise.").strip(" |")
             resultat["decision_ia"] = "A_VERIFIER"
             decision = "A_VERIFIER"
-        if dept_ia and dept_ia not in {"16", "17", "19", "23", "79", "86", "87"}:
+        if dept_ia and dept_ia not in DEPARTEMENTS_CIBLES:
             resultat["decision_ia"] = "A_VERIFIER"
             decision = "A_VERIFIER"
 
@@ -2001,8 +2140,7 @@ def appliquer_ia(pertinents, a_verifier):
         if erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
             quota_bloque = True
             print(f"⛔ Arrêt 3.1 après {erreurs_consecutives} erreurs consécutives", flush=True)
-            # Les candidats restants restent non analysés, mais le système ne lance pas 3.8.
-            for restant in candidats[position:]:
+            for restant in candidats_a_traiter[position:]:
                 restant["decision_ia"] = "IA_NON_ANALYSE"
                 restant["confiance_ia"] = 0
                 restant["raison_ia"] = "Analyse 3.1 interrompue après erreurs Gemini consécutives."
@@ -2014,13 +2152,11 @@ def appliquer_ia(pertinents, a_verifier):
         classer_statut_final(resultat, decision)
         ia_resultats.append(resultat)
 
-    # ========================================================
-    # ÉTAPE 2 — TOP candidats -> Gemini 3.8 pour ré-enrichissement
-    # ========================================================
     candidats_38 = [
         r for r in ia_resultats
         if r.get("decision_ia_1") in {"PERTINENT", "A_VERIFIER"}
         and r.get("ia_analyse") == "OUI"
+        and r.get("memoire_ia") != "OUI"
     ]
 
     def score_importance_38(r):
@@ -2040,7 +2176,7 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print("RÉ-ENRICHISSEMENT GEMINI 3.8")
     print("========================================")
-    print(f"Candidats 3.1 disponibles : {len(candidats_38)}")
+    print(f"Candidats 3.1 nouveaux disponibles : {len(candidats_38)}")
     print(f"Top 3.8 sélectionné : {len(top_38)}/{MAX_IA_38}")
     print(flush=True)
 
@@ -2055,6 +2191,7 @@ def appliquer_ia(pertinents, a_verifier):
         print(f"[IA 3.8] {position}/{len(top_38)} — ré-enrichissement — {court(resultat.get('titre', ''))}", flush=True)
         analyse38 = analyser_resultat_38(resultat, resultat)
         dernier_appel_38 = time.time()
+        appels_38 += 1
         resultat.update(analyse38)
         resultat["escalade_38"] = "OUI"
         resultat["motif_escalade_38"] = "Top candidat après analyse Gemini 3.1"
@@ -2073,7 +2210,6 @@ def appliquer_ia(pertinents, a_verifier):
             resultat["modele_ia"] = "gemini-3.1-flash-lite"
             resultat["raison_ia"] = str(resultat.get("raison_ia_1", "")) + " | 3.8 indisponible, analyse 3.1 conservée."
 
-    # Réintégration des candidats non éligibles Python et des candidats restants.
     for resultat in non_eligibles:
         ia_resultats.append(resultat)
 
@@ -2082,29 +2218,25 @@ def appliquer_ia(pertinents, a_verifier):
     nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
     nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
 
+    # Les décisions mémorisées n'ont pas besoin d'être recalculées par Gemini.
+    for r in ia_resultats:
+        if r.get("memoire_ia") == "OUI":
+            r["decision_ia"] = r.get("decision_ia") or r.get("decision_ia_1", "A_VERIFIER")
+            r["modele_ia"] = r.get("modele_ia") or r.get("modele_ia_1", "MEMOIRE")
+            classer_statut_final(r, r.get("decision_ia", "A_VERIFIER"))
+
     print()
-    print(f"Analyses Gemini 3.1 effectuées : {sum(1 for r in ia_resultats if r.get('modele_ia_1') == 'gemini-3.1-flash-lite')}")
-    print(f"Ré-enrichissements Gemini 3.8 effectués : {sum(1 for r in ia_resultats if r.get('escalade_38') == 'OUI')}/{MAX_IA_38}")
+    print(f"Analyses Gemini 3.1 effectuées cette run : {appels_31}")
+    print(f"Enrichissements Gemini 3.8 effectués cette run : {appels_38}/{MAX_IA_38}")
+    print(f"Réutilisations mémoire IA : {len(candidats_memorises)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
     print(
         "Décisions finales : "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinent / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'NON_PERTINENT')} non pertinent / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_INDISPONIBLE')} indisponible / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_REQUISE')} non requis / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'IA_NON_ANALYSE')} non analysé"
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinents / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier"
     )
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
-
-# ============================================================
-# SUIVI PRÉCIS DES TÂCHES
-# ============================================================
-
-SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
-SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
-
 
 def _nouvelle_tache(nom, description=""):
     return {
@@ -2387,6 +2519,9 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_
         "gemini_score_min": GEMINI_SCORE_MIN,
         "gemini_max_analyses": "3.1 illimité / 3.8 max 5",
         "gemini_cooldown": "3.1: 10 s / 3.8: 60 s",
+        "memoire_ia_fichier": str(IA_MEMORY_FILE.relative_to(ROOT)),
+        "memoire_ia_reutilisations": sum(1 for r in ia_resultats if r.get("memoire_ia") == "OUI"),
+        "memoire_ia_nouveaux": sum(1 for r in ia_resultats if r.get("ia_analyse") == "OUI" and r.get("memoire_ia") != "OUI"),
     })
     card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
@@ -2479,6 +2614,8 @@ def sauvegarder(
         "erreur_ia_type",
         "geographie_corrigee",
         "ia_analyse",
+        "memoire_ia",
+        "date_ia_memoire",
         "statut_final",
         "date_collecte",
     ]
@@ -2693,7 +2830,13 @@ def main():
     # COUCHE IA
     # --------------------------------------------------------
     demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
-    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(pertinents, a_verifier)
+    memoire_ia = charger_memoire_ia()
+    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(pertinents, a_verifier, memoire_ia)
+    try:
+        sauvegarder_memoire_ia(ia_resultats, memoire_ia)
+        print(f"🧠 Mémoire IA sauvegardée : {IA_MEMORY_FILE}")
+    except Exception as e:
+        print(f"⚠️ Impossible de sauvegarder la mémoire IA : {type(e).__name__} : {e}")
     terminer_tache(5, details=f"{len(ia_resultats)} candidats traités")
 
     # Les candidats que l'IA déclare NON_PERTINENT restent dans
