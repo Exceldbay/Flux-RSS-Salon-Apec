@@ -12,6 +12,7 @@ import difflib
 import subprocess
 import sys
 import os
+from html import unescape
 
 import feedparser
 import pandas as pd
@@ -77,7 +78,7 @@ OUTPUT = ROOT / "output"
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
-COOLDOWN_31_SECONDS = int(os.getenv("GEMINI_31_COOLDOWN_SECONDS", "15"))
+COOLDOWN_31_SECONDS = int(os.getenv("GEMINI_31_COOLDOWN_SECONDS", "10"))
 COOLDOWN_38_SECONDS = int(os.getenv("GEMINI_38_COOLDOWN_SECONDS", "60"))
 MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "5"))
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
@@ -105,6 +106,124 @@ SIMILARITE_TITRE_DEDOUBLONNAGE = 0.94
 DATE_PUBLICATION_MIN = datetime(2025, 12, 1)
 
 thread_local = threading.local()
+
+# Journal détaillé de la phase de recherche RSS.
+JOURNAL_RECHERCHE = []
+JOURNAL_RECHERCHE_LOCK = threading.Lock()
+
+def enregistrer_log_recherche(requete, **infos):
+    """Ajoute une ligne au journal de recherche, de façon thread-safe."""
+    ligne = {
+        "horodatage": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "departement": requete.get("departement", ""),
+        "nom_departement": requete.get("nom_departement", ""),
+        "annee": requete.get("annee", ""),
+        "categorie": requete.get("categorie", ""),
+        "mot_cle": requete.get("mot_cle", ""),
+        "complement": requete.get("complement", ""),
+        "lieu": requete.get("lieu", ""),
+        "operateur_web": requete.get("operateur_web", ""),
+        "famille_operateur": requete.get("famille_operateur", ""),
+    }
+    ligne.update(infos)
+    with JOURNAL_RECHERCHE_LOCK:
+        JOURNAL_RECHERCHE.append(ligne)
+
+def nettoyer_texte_rapport(valeur):
+    return " ".join(unescape(str(valeur or "")).replace("\n", " ").split())
+
+def generer_rapports_recherche(requetes, resultats_bruts, erreurs, duree_collecte,
+                               resultats_externes=0, erreurs_externes=0):
+    """Produit un journal Word + PDF + CSV de la phase de recherche."""
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    except Exception as exc:
+        print(f"⚠️ Export Word/PDF des logs indisponible : {exc}")
+        return None
+
+    maintenant = datetime.now()
+    horodatage = maintenant.strftime("%Y%m%d_%H%M%S")
+    docx_path = OUTPUT / f"journal_recherche_{horodatage}.docx"
+    pdf_path = OUTPUT / f"journal_recherche_{horodatage}.pdf"
+    csv_path = OUTPUT / f"journal_recherche_{horodatage}.csv"
+
+    with JOURNAL_RECHERCHE_LOCK:
+        journal = list(JOURNAL_RECHERCHE)
+    journal.sort(key=lambda x: x.get("horodatage", ""))
+
+    ok = sum(1 for x in journal if x.get("statut") == "OK")
+    ko = sum(1 for x in journal if x.get("statut") != "OK")
+    total_resultats = sum(int(x.get("nb_resultats", 0) or 0) for x in journal)
+    pd.DataFrame(journal).to_csv(csv_path, index=False, encoding="utf-8-sig")
+
+    # ---------- Word ----------
+    doc = Document()
+    doc.styles["Normal"].font.name = "Arial"
+    doc.styles["Normal"].font.size = Pt(9)
+    doc.add_heading("Journal de recherche – Flux RSS Salon APEC", 0)
+    doc.add_paragraph(f"Exécution : {maintenant.strftime('%d/%m/%Y %H:%M:%S')}")
+    doc.add_paragraph(f"Version : {VERSION_PROGRAMME} | Règles IA : {REGLES_VERSION}")
+    doc.add_paragraph(f"Période : ≥ {ANNEE_MIN} | priorité {ANNEE_PRIORITAIRE}")
+    doc.add_paragraph(f"Collecte RSS : {len(requetes)} requêtes | {total_resultats} résultats bruts | {ok} OK | {ko} erreurs | {duree_collecte:.1f} s")
+    doc.add_paragraph(f"Sources externes intégrées : {resultats_externes} résultats | erreurs externes : {erreurs_externes}")
+
+    doc.add_heading("1. Résumé", level=1)
+    resume=[("Requêtes générées",len(requetes)),("Requêtes journalisées",len(journal)),("Résultats RSS bruts",total_resultats),
+            ("Requêtes avec résultats",sum(1 for x in journal if int(x.get("nb_resultats",0) or 0)>0)),
+            ("Requêtes en erreur",ko),("Workers",MAX_WORKERS),("Timeout",f"{TIMEOUT} s"),("Tentatives max",MAX_RETRIES)]
+    t=doc.add_table(rows=1,cols=2); t.style="Table Grid"
+    t.rows[0].cells[0].text="Indicateur"; t.rows[0].cells[1].text="Valeur"
+    for a,b in resume:
+        c=t.add_row().cells; c[0].text=str(a); c[1].text=str(b)
+
+    doc.add_heading("2. Journal détaillé des requêtes", level=1)
+    t=doc.add_table(rows=1,cols=8); t.style="Table Grid"
+    for i,h in enumerate(["Heure","Dept.","Année","Catégorie","Mot-clé","Lieu","Statut","Résultats"]): t.rows[0].cells[i].text=h
+    for x in journal:
+        vals=[x.get("horodatage",""),x.get("departement",""),x.get("annee",""),nettoyer_texte_rapport(x.get("categorie","")),
+              nettoyer_texte_rapport(x.get("mot_cle","")),nettoyer_texte_rapport(x.get("lieu","")),x.get("statut",""),x.get("nb_resultats",0)]
+        c=t.add_row().cells
+        for i,v in enumerate(vals): c[i].text=str(v)
+
+    doc.add_page_break(); doc.add_heading("3. Résultats RSS bruts", level=1)
+    doc.add_paragraph("Ces résultats sont ceux obtenus pendant la recherche, avant filtrage métier, scoring et déduplication.")
+    t=doc.add_table(rows=1,cols=7); t.style="Table Grid"
+    for i,h in enumerate(["Dept.","Année","Source","Publication","Titre","URL","Mot-clé"]): t.rows[0].cells[i].text=h
+    for r in resultats_bruts:
+        vals=[r.get("departement",""),r.get("annee_recherchee",""),nettoyer_texte_rapport(r.get("source","")),nettoyer_texte_rapport(r.get("date_publication","")),
+              nettoyer_texte_rapport(r.get("titre","")),r.get("url",""),nettoyer_texte_rapport(r.get("mot_cle",""))]
+        c=t.add_row().cells
+        for i,v in enumerate(vals): c[i].text=str(v)
+    doc.add_heading("4. Périmètre du journal", level=1)
+    doc.add_paragraph("Le présent fichier documente la partie recherche/collecte. Les décisions de pertinence, exclusions, déduplication et analyses Gemini sont appliquées ensuite.")
+    doc.save(docx_path)
+
+    # ---------- PDF ----------
+    styles=getSampleStyleSheet(); styles.add(ParagraphStyle(name="SmallApec",parent=styles["BodyText"],fontSize=6.2,leading=7.2))
+    pdf=SimpleDocTemplate(str(pdf_path),pagesize=landscape(A4),rightMargin=7*mm,leftMargin=7*mm,topMargin=7*mm,bottomMargin=7*mm)
+    story=[Paragraph("Journal de recherche – Flux RSS Salon APEC",styles["Title"]),
+           Paragraph(f"{maintenant.strftime('%d/%m/%Y %H:%M:%S')} | {len(requetes)} requêtes | {total_resultats} résultats bruts | {ko} erreurs",styles["SmallApec"]),Spacer(1,5)]
+    data=[["Heure","Dept","Année","Catégorie","Mot-clé","Lieu","Statut","Résultats"]]
+    for x in journal:
+        data.append([str(x.get("horodatage","")),str(x.get("departement","")),str(x.get("annee","")),nettoyer_texte_rapport(x.get("categorie",""))[:30],nettoyer_texte_rapport(x.get("mot_cle",""))[:42],nettoyer_texte_rapport(x.get("lieu",""))[:20],str(x.get("statut","")),str(x.get("nb_resultats",0))])
+    tbl=Table(data,repeatRows=1,colWidths=[27*mm,11*mm,11*mm,36*mm,55*mm,26*mm,18*mm,15*mm])
+    tbl.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.grey),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTSIZE",(0,0),(-1,-1),5.2),("LEADING",(0,0),(-1,-1),6.2),("GRID",(0,0),(-1,-1),0.25,colors.grey),("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.append(tbl); story.append(PageBreak()); story.append(Paragraph("Résultats RSS bruts",styles["Heading2"]))
+    data2=[["Dept","Année","Source","Publication","Titre","URL"]]
+    for r in resultats_bruts:
+        data2.append([str(r.get("departement","")),str(r.get("annee_recherchee","")),nettoyer_texte_rapport(r.get("source",""))[:26],nettoyer_texte_rapport(r.get("date_publication",""))[:22],nettoyer_texte_rapport(r.get("titre",""))[:75],str(r.get("url",""))[:115]])
+    tbl2=Table(data2,repeatRows=1,colWidths=[12*mm,13*mm,32*mm,28*mm,80*mm,88*mm])
+    tbl2.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.grey),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTSIZE",(0,0),(-1,-1),5),("LEADING",(0,0),(-1,-1),6),("GRID",(0,0),(-1,-1),0.25,colors.grey),("VALIGN",(0,0),(-1,-1),"TOP")]))
+    story.append(tbl2); story.append(Spacer(1,5)); story.append(Paragraph("Les résultats sont bruts et peuvent être rejetés lors des étapes ultérieures.",styles["SmallApec"]))
+    pdf.build(story)
+    print(f"📄 Journal recherche Word : {docx_path}"); print(f"📄 Journal recherche PDF : {pdf_path}"); print(f"🧾 Journal recherche CSV : {csv_path}")
+    return {"docx":docx_path,"pdf":pdf_path,"csv":csv_path}
 
 
 # ============================================================
@@ -776,6 +895,7 @@ def rechercher_google_news(requete):
 
     session = get_session()
     derniere_erreur = ""
+    debut_recherche = time.time()
 
     for tentative in range(MAX_RETRIES):
         try:
@@ -816,6 +936,11 @@ def rechercher_google_news(requete):
                     "mot_cle": requete["mot_cle"],
                 })
 
+            enregistrer_log_recherche(
+                requete, statut="OK", nb_resultats=len(resultats),
+                duree_ms=round((time.time() - debut_recherche) * 1000),
+                url_recherche=url, tentative=tentative + 1, erreur=""
+            )
             return {
                 "ok": True,
                 "resultats": resultats,
@@ -827,6 +952,11 @@ def rechercher_google_news(requete):
             if tentative < MAX_RETRIES - 1:
                 time.sleep(0.5)
 
+    enregistrer_log_recherche(
+        requete, statut="ERREUR", nb_resultats=0,
+        duree_ms=round((time.time() - debut_recherche) * 1000),
+        url_recherche=url, tentative=MAX_RETRIES, erreur=derniere_erreur
+    )
     return {
         "ok": False,
         "resultats": [],
@@ -1751,11 +1881,45 @@ def appliquer_ia(pertinents, a_verifier):
     """Cascade IA : tous les candidats passent par 3.1, top 5 ré-enrichis par 3.8."""
     tous_candidats = pertinents + a_verifier
 
-    # Premier filtre Python : seuls les candidats >= seuil sont soumis à Gemini.
+    # Premier filtre Python : score positif suffisant + périmètre géographique strict.
+    # Les scores négatifs ne comptent jamais dans le volume IA et les résultats
+    # explicitement hors périmètre sont retirés avant tout appel Gemini.
     candidats = []
     non_eligibles = []
+    hors_perimetre = []
     for candidat in tous_candidats:
         score = int(candidat.get("score", 0) or 0)
+        dept = str(candidat.get("departement", "")).strip()
+        erreur_geo = str(candidat.get("erreur_geographique", "")).strip()
+
+        if dept and dept not in DEPARTEMENTS_CIBLES:
+            candidat["erreur_geographique"] = "ERREUR_GEOGRAPHIQUE"
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = f"Hors périmètre géographique : département {dept}."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = "Non pertinent"
+            hors_perimetre.append(candidat)
+            continue
+
+        if erreur_geo == "ERREUR_GEOGRAPHIQUE":
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = "Hors périmètre géographique : exclu avant analyse IA."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = "Non pertinent"
+            hors_perimetre.append(candidat)
+            continue
+
+        if score < 0:
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = f"Score négatif : {score}. Exclu du filtrage IA."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = candidat.get("statut", "À vérifier")
+            non_eligibles.append(candidat)
+            continue
+
         if score >= GEMINI_SCORE_MIN:
             candidats.append(candidat)
         else:
@@ -1786,7 +1950,9 @@ def appliquer_ia(pertinents, a_verifier):
     print("========================================")
     print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
     print(f"Candidats ayant passé le filtre : {len(candidats)}")
-    print("Gemini 3.1 Flash Lite : TOUS les candidats | cooldown 15 s")
+    print(f"Exclus IA pour score négatif / insuffisant : {len(non_eligibles)}")
+    print(f"Retirés pour hors périmètre géographique : {len(hors_perimetre)}")
+    print("Gemini 3.1 Flash Lite : TOUS les candidats | cooldown 10 s")
     print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} | ré-enrichissement | cooldown 60 s")
     print(flush=True)
 
@@ -2413,7 +2579,7 @@ def main():
     print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
     print(
         f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
-        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/15s | 3.8: max {MAX_IA_38}/60s"
+        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/10s | 3.8: max {MAX_IA_38}/60s"
     )
 
     initialiser_suivi_taches()
@@ -2467,6 +2633,17 @@ def main():
         terminer_tache(1, "ERREUR", erreur=f"{type(e).__name__}: {e}")
     else:
         terminer_tache(1, details=f"{len(externes)} résultats externes")
+
+    # Export du journal de recherche après la collecte RSS + sources externes.
+    try:
+        generer_rapports_recherche(
+            requetes, resultats_bruts, erreurs,
+            duree_collecte=time.time() - debut_total,
+            resultats_externes=len(externes),
+            erreurs_externes=0,
+        )
+    except Exception as e:
+        print(f"⚠️ Journal de recherche non généré : {type(e).__name__} : {e}")
 
     resultats_bruts = externes + resultats_bruts
 
