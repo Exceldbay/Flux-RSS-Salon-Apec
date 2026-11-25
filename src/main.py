@@ -83,6 +83,7 @@ COOLDOWN_38_SECONDS = int(os.getenv("GEMINI_38_COOLDOWN_SECONDS", "60"))
 MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "5"))
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
+DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
 
 # Gestion des années : 2027 est la priorité, 2025 et avant sont écartés.
 ANNEE_MIN = 2026          # toute information antérieure est retirée
