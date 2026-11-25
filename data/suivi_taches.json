@@ -1,15 +1,15 @@
 {
-  "date_generation": "2026-11-24T16:53:35",
+  "date_generation": "2026-11-25T08:10:17",
   "taches": [
     {
       "id": "T01",
       "tache": "Collecte RSS",
       "description": "Interrogation des requêtes legacy + V2",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:46:44",
-      "fin": "2026-11-24T16:47:06",
-      "duree_s": 22.0,
-      "details": "2963 résultats, 1 erreurs",
+      "debut": "2026-11-25T07:34:35",
+      "fin": "2026-11-25T07:34:55",
+      "duree_s": 20.0,
+      "details": "3032 résultats, 0 erreurs",
       "erreur": ""
     },
     {
@@ -17,10 +17,10 @@
       "tache": "Collecte sources externes",
       "description": "Sites institutionnels, OpenAgenda et autres sources",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:47:06",
-      "fin": "2026-11-24T16:49:19",
-      "duree_s": 133.0,
-      "details": "525 résultats externes",
+      "debut": "2026-11-25T07:34:55",
+      "fin": "2026-11-25T07:37:00",
+      "duree_s": 125.0,
+      "details": "484 résultats externes",
       "erreur": ""
     },
     {
@@ -28,10 +28,10 @@
       "tache": "Dédoublonnage",
       "description": "Fusion des résultats identiques ou quasi identiques",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:49:19",
-      "fin": "2026-11-24T16:49:42",
+      "debut": "2026-11-25T07:37:00",
+      "fin": "2026-11-25T07:37:23",
       "duree_s": 23.0,
-      "details": "1135 résultats conservés après traitement",
+      "details": "1144 résultats conservés après traitement",
       "erreur": ""
     },
     {
@@ -39,10 +39,10 @@
       "tache": "Scoring / qualification",
       "description": "Détection événement, cible, géographie et période",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:49:42",
-      "fin": "2026-11-24T16:49:42",
+      "debut": "2026-11-25T07:37:23",
+      "fin": "2026-11-25T07:37:23",
       "duree_s": 0.0,
-      "details": "17 pertinents / 101 à vérifier / 1017 non pertinents",
+      "details": "15 pertinents / 99 à vérifier / 1030 non pertinents",
       "erreur": ""
     },
     {
@@ -61,10 +61,10 @@
       "tache": "Analyse IA",
       "description": "Analyse Gemini des cas ambigus",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:49:42",
-      "fin": "2026-11-24T16:53:34",
-      "duree_s": 232.0,
-      "details": "117 candidats traités",
+      "debut": "2026-11-25T07:37:23",
+      "fin": "2026-11-25T08:10:17",
+      "duree_s": 1974.0,
+      "details": "114 candidats traités",
       "erreur": ""
     },
     {
@@ -72,8 +72,8 @@
       "tache": "Delta / historique",
       "description": "Comparaison avec la veille précédente",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:53:34",
-      "fin": "2026-11-24T16:53:34",
+      "debut": "2026-11-25T08:10:17",
+      "fin": "2026-11-25T08:10:17",
       "duree_s": 0.0,
       "details": "0 évolutions détectées",
       "erreur": ""
@@ -83,8 +83,8 @@
       "tache": "Statistiques opérateurs",
       "description": "Mesure du rendement des requêtes",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:53:34",
-      "fin": "2026-11-24T16:53:34",
+      "debut": "2026-11-25T08:10:17",
+      "fin": "2026-11-25T08:10:17",
       "duree_s": 0.0,
       "details": "48 opérateurs mesurés",
       "erreur": ""
@@ -94,8 +94,8 @@
       "tache": "Sauvegarde CSV",
       "description": "Écriture des résultats et audits",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:53:34",
-      "fin": "2026-11-24T16:53:34",
+      "debut": "2026-11-25T08:10:17",
+      "fin": "2026-11-25T08:10:17",
       "duree_s": 0.0,
       "details": "CSV principaux + audits enregistrés",
       "erreur": ""
@@ -105,9 +105,9 @@
       "tache": "Synchronisation Excel",
       "description": "Mise à jour du classeur",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:53:34",
-      "fin": "2026-11-24T16:53:35",
-      "duree_s": 1.0,
+      "debut": "2026-11-25T08:10:17",
+      "fin": "2026-11-25T08:10:17",
+      "duree_s": 0.0,
       "details": "Classeur Excel mis à jour",
       "erreur": ""
     },
@@ -116,9 +116,9 @@
       "tache": "Préparation Teams",
       "description": "Construction de la synthèse quotidienne",
       "statut": "TERMINEE",
-      "debut": "2026-11-24T16:53:34",
-      "fin": "2026-11-24T16:53:35",
-      "duree_s": 1.0,
+      "debut": "2026-11-25T08:10:17",
+      "fin": "2026-11-25T08:10:17",
+      "duree_s": 0.0,
       "details": "Payload Teams préparé et notification traitée",
       "erreur": ""
     },
@@ -128,7 +128,7 @@
       "description": "Notification Teams si configurée et autorisée",
       "statut": "TERMINEE",
       "debut": "",
-      "fin": "2026-11-24T16:53:34",
+      "fin": "2026-11-25T08:10:17",
       "duree_s": 0,
       "details": "secret TEAMS_WEBHOOK_URL absent",
       "erreur": ""
