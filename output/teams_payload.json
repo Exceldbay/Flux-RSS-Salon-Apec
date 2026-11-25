@@ -1,452 +1,180 @@
-{
-  "type": "message",
-  "attachments": [
-    {
-      "contentType": "application/vnd.microsoft.card.adaptive",
-      "contentUrl": null,
-      "content": {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.2",
-        "body": [
-          {
-            "type": "TextBlock",
-            "text": "🔎 Veille APEC — synthèse quotidienne",
-            "weight": "Bolder",
-            "size": "Large",
-            "wrap": true
-          },
-          {
-            "type": "TextBlock",
-            "text": "25/11/2026 08:10",
-            "isSubtle": true,
-            "spacing": "None"
-          },
-          {
-            "type": "FactSet",
-            "facts": [
-              {
-                "title": "Nouveaux pertinents",
-                "value": "16"
-              },
-              {
-                "title": "Promus pertinents",
-                "value": "0"
-              },
-              {
-                "title": "Nouveaux 2027 à vérifier",
-                "value": "1"
-              },
-              {
-                "title": "Évolutions utiles",
-                "value": "0"
-              },
-              {
-                "title": "Pertinents actuels",
-                "value": "8"
-              },
-              {
-                "title": "À vérifier actuels",
-                "value": "23"
-              },
-              {
-                "title": "Tâches terminées",
-                "value": "8/12"
-              },
-              {
-                "title": "Erreurs tâches",
-                "value": "0"
-              }
+import json
+import os
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import requests
+
+
+TEAMS_WEBHOOK_ENV = "TEAMS_WEBHOOK_URL"
+TEAMS_STATE_FILE = "teams_last_sent.txt"
+TEAMS_MIN_INTERVAL_HOURS = 20
+
+
+def _clean(value, limit=240):
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _url(resultat):
+    return resultat.get("url_finale") or resultat.get("url_reelle") or resultat.get("url") or ""
+
+
+def _date(resultat):
+    return resultat.get("date_evenement_page") or resultat.get("date_ia") or "date non précisée"
+
+
+def _count_by(items, key):
+    out = {}
+    for r in items or []:
+        value = str(r.get(key, "") or "").strip() or "Non renseigné"
+        out[value] = out.get(value, 0) + 1
+    return sorted(out.items(), key=lambda x: (-x[1], x[0]))
+
+
+def _text_list(items, key, limit=8):
+    return ", ".join(f"{k}: {v}" for k, v in _count_by(items, key)[:limit]) or "Aucune donnée"
+
+
+def construire_resume_teams(delta, stats, meta, taches=None):
+    """Construit le rapport Teams : récapitulatif de veille + impact réel dans le tableur."""
+    nouveaux_pertinents = delta.get("nouveaux_pertinents", []) or []
+    promus = delta.get("promus_pertinents", []) or []
+    nouveaux_verif = delta.get("nouveaux_a_verifier_2027", []) or []
+    evolutions = delta.get("evolutions", []) or []
+
+    ajouts_tableur = delta.get("ajouts_tableur", []) or []
+    modifications_tableur = delta.get("modifications_tableur", []) or []
+    # Si aucune comparaison Excel n'est disponible, on retombe sur le delta utile.
+    if not ajouts_tableur:
+        ajouts_tableur = nouveaux_pertinents + nouveaux_verif
+    if not modifications_tableur:
+        modifications_tableur = promus + evolutions
+
+    def section(titre, items, limit=8, show_link=True):
+        blocks = [{"type": "TextBlock", "text": titre, "weight": "Bolder", "spacing": "Medium"}]
+        for r in items[:limit]:
+            title = _clean(r.get("titre_page") or r.get("titre", ""), 180)
+            dept = r.get("departement", "?")
+            score = r.get("score", "")
+            priorite = r.get("priorite_2027", "")
+            date_evt = _date(r)
+            source = _clean(r.get("source", ""), 80)
+            detail = f"Dép. {dept} · score {score} · {date_evt}"
+            if priorite and priorite != "FAIBLE":
+                detail += f" · 2027 {priorite}"
+            if source:
+                detail += f" · {source}"
+            blocks += [
+                {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True, "spacing": "Small"},
+                {"type": "TextBlock", "text": detail, "wrap": True, "spacing": "None"},
             ]
-          },
-          {
-            "type": "TextBlock",
-            "text": "À regarder en priorité",
-            "weight": "Bolder",
-            "spacing": "Medium"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Journée Portes Ouvertes - Campus Rodez | 3iL Ingénieurs",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 19 · score 56 · 2027 FORTE · 2027-01-23 · 3iL Ingénieurs",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-campus-rodez/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Journée Portes Ouvertes EXCELIA | EXCELIA",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 17 · score 63 · 2026-12-05 · Excelia",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.excelia-group.fr/journees-portes-ouvertes-2026"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Job Dating Limoges 2026 : date, horaires, exposants",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 53 · 2026-06-25T09:00:00+02:00 · Alsace",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.jds.fr/limoges/foires-et-salons/marches/job-dating-1614210_A"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Espaces ancien·ne·s (UP alumnis) – Université de Poitiers",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 86 · score 51 · date non précisée · Université de Poitiers",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.univ-poitiers.fr/espaces-ancien-ne-s-up-alumnis/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Limoges I Salons & forums 26/27 I Rencontrez l’Université de Limoges, Parc des Expo, Limoges - Unidivers",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 50 · 2027 MOYENNE · date non précisée · Unidivers",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMi0wFBVV95cUxNSjJSbUZGRXdvUEpKMUZPYmxVTE9QLVVOYXlyU2MyNlFRVGxPT1BIUlE4R0JlTmE5SGZSZzRfc015aVhCd2JNRFg5WW9RTXd2OXcxZXBXV0pWc1RFRE5haExlUk9kUUstMnhqUlR3UTFRSGFsVE50dUhRSEp4YVREVkM2eElLTTBpQlBkSVFveTZ5MmllVWZYNjktYXMwNW1ScENQWE9KQy12OHNvR0JsaWYtcDVSTDFoVHFqVVV4aURReGVNZ0RtcHlLSnZUNE50OFF3?oc=5"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Ecole d'ingénieurs Portes Ouvertes, Salons, Evénements | EIGSI La Rochelle",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 17 · score 49 · date non précisée · EIGSI",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.eigsi.fr/category/rencontrez-nous/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Salons, Forums et JPO 2025-2026 – Venez à notre rencontre !! - Université de Limoges",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 45 · date non précisée · Université de Limoges",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMimAFBVV95cUxNR3BMYnBZampJMVBMYWcyM3BlWFp0REpjVUEwOGZHd0JUUGc2cEkybGF0ckF3ejFTMy1EY0hBazJWVzhrSDZXZUFKYWdnQ19aTFVfMXNtYWZ2amdfSUlEQnlmZVV4RlVKdUZENERwYzl5T2EzcjVNWldoaEFnQXROOS05aGp4NTZOWml3ZGNqcklpY21LYm5SNQ?oc=5"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Insertion professionnelle | ISAE-ENSMA // École Nationale Supérieure de Mécanique et d’Aérotechnique",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 86 · score 42 · date non précisée · ENSMA",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.ensma.fr/entreprises/insertion-professionnelle/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Journée Portes ouvertes - Campus Nantes | 3iL Ingénieurs",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 19 · score 42 · 2026-11-28 · 3iL Ingénieurs",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.3il-ingenieurs.fr/agenda/journees-portes-ouvertes/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Portes Ouvertes & salons - Université de Limoges",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 40 · date non précisée · Université de Limoges",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMiTEFVX3lxTE1wTFo2S3JNVTRBOFNzYTVmaDdkWHY5cXg4bEtkWHQxdE5KQlFQTmZRaEx3ZzhzczEwdnRXd3QxV2Z1MFR1VHhBTUs1ZlA?oc=5"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Suivi détaillé des tâches",
-            "weight": "Bolder",
-            "spacing": "Medium"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 20.0s — 3032 résultats, 0 erreurs",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 125.0s — 484 résultats externes",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 23.0s — 1144 résultats conservés après traitement",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 15 pertinents / 99 à vérifier / 1030 non pertinents",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "⏳ T01 — Enrichissement pages",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 1974.0s — 114 candidats traités",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Delta / historique — 0 évolutions détectées",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Statistiques opérateurs — 48 opérateurs mesurés",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "✅ T01 — Sauvegarde CSV — CSV principaux + audits enregistrés",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "⏳ T01 — Synchronisation Excel",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "🔄 T01 — Préparation Teams",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "⏳ T01 — Envoi Teams",
-            "wrap": true,
-            "spacing": "None",
-            "size": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Opérateurs les plus utiles",
-            "weight": "Bolder",
-            "spacing": "Medium"
-          },
-          {
-            "type": "TextBlock",
-            "text": "source:site_officiel — 83 uniques · 10 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "\"forum entreprises\" site:univ-larochelle.fr — 26 uniques · 4 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "\"forum entreprises\" site:unilim.fr — 72 uniques · 4 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "enseignement supérieur — 346 uniques · 3 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "salons et forums — 5 uniques · 2 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Suivi d'exécution : ✅ Toutes les tâches sont terminées · 8/12 terminées",
-            "wrap": true,
-            "spacing": "Medium",
-            "weight": "Bolder"
-          },
-          {
-            "type": "TextBlock",
-            "text": "IA : 54 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
-            "isSubtle": true,
-            "wrap": true,
-            "spacing": "Medium"
-          }
-        ]
-      }
-    }
-  ]
-}
+            link = _url(r)
+            if show_link and link:
+                blocks.append({"type": "ActionSet", "actions": [{"type": "Action.OpenUrl", "title": "Ouvrir la source", "url": link}], "spacing": "None"})
+        return blocks
+
+    # Statistiques de la collecte.
+    body = [
+        {"type": "TextBlock", "text": "🔎 VEILLE APEC — RÉCAPITULATIF", "weight": "Bolder", "size": "Large", "wrap": True},
+        {"type": "TextBlock", "text": meta.get("date", datetime.now().strftime("%d/%m/%Y %H:%M")), "isSubtle": True, "spacing": "None"},
+        {"type": "FactSet", "facts": [
+            {"title": "Requêtes effectuées", "value": str(meta.get("requetes", 0))},
+            {"title": "Résultats RSS", "value": str(meta.get("resultats_rss", 0))},
+            {"title": "Sources externes", "value": str(meta.get("resultats_externes", 0))},
+            {"title": "Résultats bruts", "value": str(meta.get("resultats_bruts", 0))},
+            {"title": "Après dédoublonnage", "value": str(meta.get("resultats_conserves", 0))},
+            {"title": "Candidats IA", "value": str(meta.get("candidats_ia", 0))},
+            {"title": "Gemini 3.1", "value": str(meta.get("gemini_31", 0))},
+            {"title": "Gemini 3.8", "value": str(meta.get("gemini_38", 0))},
+            {"title": "Pertinents", "value": str(meta.get("pertinents", 0))},
+            {"title": "À vérifier", "value": str(meta.get("a_verifier", 0))},
+            {"title": "Non pertinents", "value": str(meta.get("non_pertinents", 0))},
+        ]},
+        {"type": "TextBlock", "text": "📥 CE QUE LES FLUX RSS AJOUTENT AU TABLEUR", "weight": "Bolder", "size": "Medium", "spacing": "Medium"},
+        {"type": "FactSet", "facts": [
+            {"title": "Nouveaux événements intégrés", "value": str(len(ajouts_tableur))},
+            {"title": "Nouveaux pertinents", "value": str(len(nouveaux_pertinents))},
+            {"title": "Nouveaux à vérifier 2027", "value": str(len(nouveaux_verif))},
+            {"title": "Promotions", "value": str(len(promus))},
+            {"title": "Modifications utiles", "value": str(len(modifications_tableur))},
+        ]},
+        {"type": "TextBlock", "text": "Par département : " + _text_list(ajouts_tableur, "departement"), "wrap": True, "spacing": "Small"},
+        {"type": "TextBlock", "text": "Par décision : " + _text_list(ajouts_tableur, "statut_final"), "wrap": True, "spacing": "None"},
+        {"type": "TextBlock", "text": "Par année : " + _text_list(ajouts_tableur, "annee_detectee"), "wrap": True, "spacing": "None"},
+        {"type": "TextBlock", "text": "Par source : " + _text_list(ajouts_tableur, "source"), "wrap": True, "spacing": "None"},
+    ]
+
+    if ajouts_tableur:
+        body += section("🆕 NOUVEAUX ÉVÉNEMENTS AJOUTÉS", ajouts_tableur, limit=10)
+    if promus:
+        body += section("⬆️ PROMOTIONS", promus, limit=6)
+    if evolutions:
+        body += section("🔄 MODIFICATIONS / ÉVOLUTIONS", evolutions, limit=6)
+    if not ajouts_tableur and not promus and not evolutions:
+        body.append({"type": "TextBlock", "text": "Aucun nouvel événement utile n'a été ajouté au tableur lors de cette veille.", "wrap": True, "spacing": "Medium"})
+
+    # Tâches et qualité d'exécution.
+    if taches:
+        body.append({"type": "TextBlock", "text": "⚙️ EXÉCUTION", "weight": "Bolder", "spacing": "Medium"})
+        for t in taches:
+            statut = str(t.get("statut", "EN ATTENTE"))
+            icone = {"TERMINEE": "✅", "EN COURS": "🔄", "ERREUR": "❌", "NON EXECUTEE": "⏭️", "EN ATTENTE": "⏳"}.get(statut, "•")
+            detail = _clean(t.get("details", ""), 120)
+            texte = f"{icone} {t.get('id', '')} — {t.get('tache', '')}"
+            if detail:
+                texte += f" — {detail}"
+            body.append({"type": "TextBlock", "text": texte, "wrap": True, "spacing": "None", "size": "Small"})
+
+    erreurs_taches = int(meta.get("taches_erreurs", 0) or 0)
+    body.append({"type": "TextBlock", "text": ("✅ Exécution terminée sans erreur" if erreurs_taches == 0 else f"⚠️ {erreurs_taches} tâche(s) en erreur"), "wrap": True, "spacing": "Medium", "weight": "Bolder"})
+    body.append({"type": "TextBlock", "text": f"IA : 3.1 = {meta.get('gemini_31', 0)} · 3.8 = {meta.get('gemini_38', 0)} · cooldown 3.1 = {meta.get('gemini_31_cooldown', 10)}s · 3.8 = {meta.get('gemini_38_cooldown', 60)}s", "isSubtle": True, "wrap": True, "spacing": "Small"})
+
+    card = {"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard", "version": "1.2", "body": body}}]}
+    return card
+
+def _etat_recent(path: Path):
+    if not path.exists():
+        return False
+    try:
+        dt = datetime.fromisoformat(path.read_text(encoding="utf-8").strip())
+        return datetime.now() - dt < timedelta(hours=TEAMS_MIN_INTERVAL_HOURS)
+    except Exception:
+        return False
+
+
+def envoyer_teams(card, state_file: Path):
+    """Envoie une seule synthèse Teams au maximum toutes les 20 h.
+
+    Sans secret TEAMS_WEBHOOK_URL, le système reste silencieux et le workflow
+    continue normalement.
+    """
+    webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
+    if not webhook:
+        return {"envoye": False, "raison": "secret TEAMS_WEBHOOK_URL absent"}
+
+    if _etat_recent(state_file):
+        return {"envoye": False, "raison": "notification déjà envoyée dans les 20 dernières heures"}
+
+    try:
+        response = requests.post(
+            webhook,
+            json=card,
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            return {
+                "envoye": False,
+                "raison": f"Teams HTTP {response.status_code}: {_clean(response.text, 300)}",
+            }
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+        return {"envoye": True, "raison": "notification Teams envoyée"}
+    except Exception as e:
+        return {"envoye": False, "raison": f"erreur Teams {type(e).__name__}: {e}"}
+
+
+def sauvegarder_payload(card, output_file: Path):
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8")
