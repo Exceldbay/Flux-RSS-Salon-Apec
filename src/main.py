@@ -25,6 +25,10 @@ from ia import analyser_resultat_31, analyser_resultat_38
 from sources_externes import collecter_sources_externes
 from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
+# Teams : envoi privé uniquement via TEAMS_PRIVATE_WEBHOOK_URL.
+# Le webhook est fourni par un workflow Microsoft Teams/Power Automate
+# configuré pour publier dans la conversation privée de son propriétaire.
+
 
 def synchroniser_excel():
     """
