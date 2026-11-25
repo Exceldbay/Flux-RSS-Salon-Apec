@@ -24,6 +24,17 @@ def _date(resultat):
     return resultat.get("date_evenement_page") or resultat.get("date_ia") or "date non précisée"
 
 
+def diagnostic_teams(state_file: Path):
+    """Retourne l'état du système Teams sans exposer le secret."""
+    webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
+    return {
+        "secret_present": bool(webhook),
+        "force_send": os.getenv("TEAMS_FORCE_SEND", "false"),
+        "etat_recent": _etat_recent(state_file),
+        "state_file": str(state_file),
+    }
+
+
 def construire_resume_teams(delta, stats, meta, taches=None):
     """Construit une carte Adaptive Card compacte, orientée delta utile."""
     nouveaux_pertinents = delta.get("nouveaux_pertinents", [])
@@ -233,36 +244,65 @@ def _etat_recent(path: Path):
 
 
 def envoyer_teams(card, state_file: Path):
-    """Envoie une seule synthèse Teams au maximum toutes les 20 h.
+    """Envoie la synthèse Teams via un webhook Workflows.
 
-    Sans secret TEAMS_PRIVATE_WEBHOOK_URL, le système reste silencieux et le workflow
-    continue normalement. Le webhook doit pointer vers un workflow Teams
-    configuré pour publier le message dans une conversation privée avec le propriétaire du workflow.
+    Le workflow peut être déclenché manuellement avec TEAMS_FORCE_SEND=true
+    pour tester l'envoi sans attendre l'expiration du délai de 20 h.
     """
     webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
-    if not webhook:
-        return {"envoye": False, "raison": "secret TEAMS_PRIVATE_WEBHOOK_URL absent"}
+    force_send = os.getenv("TEAMS_FORCE_SEND", "false").strip().lower() in {
+        "1", "true", "yes", "oui"
+    }
 
-    if _etat_recent(state_file):
-        return {"envoye": False, "raison": "notification déjà envoyée dans les 20 dernières heures"}
+    if not webhook:
+        return {
+            "envoye": False,
+            "raison": "secret TEAMS_PRIVATE_WEBHOOK_URL absent",
+        }
+
+    recent = _etat_recent(state_file)
+    if recent and not force_send:
+        return {
+            "envoye": False,
+            "raison": "notification déjà envoyée dans les 20 dernières heures",
+        }
 
     try:
         response = requests.post(
             webhook,
             json=card,
             headers={"Content-Type": "application/json"},
-            timeout=15,
+            timeout=20,
         )
+
         if response.status_code >= 400:
+            detail = _clean(response.text, 500)
+            if response.status_code in (404, 410):
+                detail += (
+                    " | Vérifier que l'URL provient bien d'un Workflow Teams "
+                    "'When a Teams webhook request is received' et non d'un ancien "
+                    "Office 365 Connector."
+                )
             return {
                 "envoye": False,
-                "raison": f"Teams HTTP {response.status_code}: {_clean(response.text, 300)}",
+                "raison": f"Teams HTTP {response.status_code}: {detail}",
             }
+
         state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
-        return {"envoye": True, "raison": "message Teams privé envoyé"}
+        state_file.write_text(
+            datetime.now().isoformat(timespec="seconds"),
+            encoding="utf-8",
+        )
+        return {
+            "envoye": True,
+            "raison": "message Teams envoyé via le webhook Workflows",
+        }
+
     except Exception as e:
-        return {"envoye": False, "raison": f"erreur Teams {type(e).__name__}: {e}"}
+        return {
+            "envoye": False,
+            "raison": f"erreur Teams {type(e).__name__}: {e}",
+        }
 
 
 def sauvegarder_payload(card, output_file: Path):
