@@ -79,11 +79,9 @@ CONFIG = ROOT / "config"
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 IA_MEMORY_FILE = DATA / "ia_memoire.json"
-IA_MEMORY_VERSION = "v1"
-
-# Fichiers de suivi des tâches du workflow
-SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
-SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
+IA_MEMORY_VERSION = "v2-global"
+GLOBAL_MEMORY_FILE = DATA / "memoire_veille_globale.json"
+MEMORY_REFRESH_DAYS = int(os.getenv("MEMORY_REFRESH_DAYS", "7"))
 
 MAX_WORKERS = 16
 TIMEOUT = 10
@@ -251,7 +249,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-25-v16-memoire-ia-teams"
+VERSION_PROGRAMME = "2026-11-25-v18-memoire-globale-3-recherches-teams"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -1132,9 +1130,101 @@ def _signature_memoire(resultat):
         "annee_recherchee": str(resultat.get("annee_recherchee", "")),
         "annee_detectee": str(resultat.get("annee_detectee", "")),
         "source": normaliser(resultat.get("source", "")),
+        "mot_cle": normaliser(resultat.get("mot_cle", "")),
+        "categorie": normaliser(resultat.get("categorie", "")),
+        "categorie_numero": str(resultat.get("categorie_numero", "")),
+        "complement": normaliser(resultat.get("complement", "")),
+        "lieu": normaliser(resultat.get("lieu", "")),
+        "operateur_web": normaliser(resultat.get("operateur_web", "")),
+        "famille_operateur": normaliser(resultat.get("famille_operateur", "")),
     }
     brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+
+def _cle_memoire_globale(resultat):
+    """Clé stable d'un résultat, indépendante de l'analyse IA."""
+    url = canoniser_url(resultat.get("url") or resultat.get("url_reelle") or resultat.get("url_finale"))
+    if url:
+        return "url:" + url
+    titre = cle_titre_evenement(resultat.get("titre_page") or resultat.get("titre"))
+    dept = str(resultat.get("departement", "")).strip()
+    annee = str(resultat.get("annee_detectee") or resultat.get("annee_recherchee") or "").strip()
+    return f"titre:{dept}:{annee}:{titre}" if titre else ""
+
+
+def charger_memoire_globale():
+    """Charge la mémoire de veille pour tous les résultats."""
+    if not GLOBAL_MEMORY_FILE.exists():
+        return {}
+    try:
+        data = json.loads(GLOBAL_MEMORY_FILE.read_text(encoding="utf-8"))
+        return data.get("items", {}) if isinstance(data, dict) and isinstance(data.get("items", {}), dict) else {}
+    except Exception as e:
+        print(f"⚠️ Mémoire globale illisible : {type(e).__name__} : {e}")
+        return {}
+
+
+def appliquer_memoire_globale(resultats, memoire):
+    """Réutilise les données récentes avant les enrichissements lourds."""
+    reutilises = 0
+    a_rafraichir = []
+    maintenant = datetime.now()
+    for r in resultats:
+        cle = _cle_memoire_globale(r)
+        item = memoire.get(cle) if cle else None
+        if not item:
+            a_rafraichir.append(r)
+            continue
+        try:
+            date_mem = datetime.fromisoformat(str(item.get("date_memorisation", "")).replace("Z", ""))
+            age = (maintenant - date_mem).days
+        except Exception:
+            age = MEMORY_REFRESH_DAYS + 1
+        if item.get("signature") == _signature_memoire(r) and age < MEMORY_REFRESH_DAYS:
+            for k, v in (item.get("champs") or {}).items():
+                if v not in ("", None):
+                    r[k] = v
+            r["memoire_globale"] = "OUI"
+            r["date_memoire_globale"] = item.get("date_memorisation", "")
+            reutilises += 1
+        else:
+            r["memoire_globale"] = "NON"
+            a_rafraichir.append(r)
+    print(f"🧠 Mémoire globale : {reutilises} résultats réutilisés / {len(resultats)}")
+    print(f"🔎 Nouveaux/modifiés/à rafraîchir : {len(a_rafraichir)}")
+    return a_rafraichir, reutilises
+
+
+def sauvegarder_memoire_globale(resultats, ancienne_memoire=None):
+    """Conserve la veille pour éviter les retraitements lors des runs suivantes."""
+    memoire = dict(ancienne_memoire or {})
+    champs = [
+        "titre", "url", "url_reelle", "url_finale", "source", "description",
+        "date_publication", "departement", "nom_departement", "annee_recherchee",
+        "annee_detectee", "categorie_numero", "categorie", "mot_cle", "complement",
+        "lieu", "operateur_web", "famille_operateur", "score", "statut",
+        "statut_final", "decision_ia", "confiance_ia", "raison_ia",
+        "page_enrichie", "date_evenement_page", "lieu_page", "organisateur_page",
+        "priorite_2027", "evenement_detecte", "preuve_evenement", "niveau_source_v9",
+    ]
+    for r in resultats:
+        if not isinstance(r, dict):
+            continue
+        cle = _cle_memoire_globale(r)
+        if not cle:
+            continue
+        memoire[cle] = {
+            "signature": _signature_memoire(r),
+            "date_memorisation": datetime.now().isoformat(timespec="seconds"),
+            "champs": {k: r.get(k, "") for k in champs if k in r},
+        }
+    GLOBAL_MEMORY_FILE.parent.mkdir(exist_ok=True)
+    GLOBAL_MEMORY_FILE.write_text(
+        json.dumps({"version": "v1", "updated_at": datetime.now().isoformat(timespec="seconds"), "items": memoire}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return memoire
 
 
 def charger_memoire_ia():
@@ -2079,8 +2169,12 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
 
     candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
 
-    # 1) Réutilisation de la mémoire AVANT tout enrichissement HTTP/Gemini.
-    candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats, memoire_ia)
+    # 1) Mémoire globale : seuls les nouveaux/modifiés/à rafraîchir passent
+    # dans les trois recherches lourdes.
+    memoire_globale = charger_memoire_globale()
+    candidats_a_verifier, _ = appliquer_memoire_globale(candidats, memoire_globale)
+    # 2) Mémoire IA détaillée : réutilisation des enrichissements déjà connus.
+    candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats_a_verifier, memoire_ia)
     enrichir_candidats_ia(candidats_a_traiter)
     for candidat in candidats_a_traiter:
         try:
@@ -2530,6 +2624,9 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, non
         "memoire_ia_fichier": str(IA_MEMORY_FILE.relative_to(ROOT)),
         "memoire_ia_reutilisations": sum(1 for r in ia_resultats if r.get("memoire_ia") == "OUI"),
         "memoire_ia_nouveaux": sum(1 for r in ia_resultats if r.get("ia_analyse") == "OUI" and r.get("memoire_ia") != "OUI"),
+        "memoire_globale_fichier": str(GLOBAL_MEMORY_FILE.relative_to(ROOT)),
+        "memoire_globale_reutilisations": sum(1 for r in resultats_bruts if r.get("memoire_globale") == "OUI"),
+        "memoire_globale_rafraichissement_jours": MEMORY_REFRESH_DAYS,
     })
     card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
@@ -2746,7 +2843,7 @@ def main():
     print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
     print(
         f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
-        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/10s | 3.8: max {MAX_IA_38}/60s"
+        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/10s | 3.8: max {MAX_IA_38}/60s | mémoire globale"
     )
 
     initialiser_suivi_taches()
@@ -2845,6 +2942,13 @@ def main():
         print(f"🧠 Mémoire IA sauvegardée : {IA_MEMORY_FILE}")
     except Exception as e:
         print(f"⚠️ Impossible de sauvegarder la mémoire IA : {type(e).__name__} : {e}")
+
+    try:
+        memoire_globale = charger_memoire_globale()
+        sauvegarder_memoire_globale(resultats_bruts, memoire_globale)
+        print(f"🧠 Mémoire globale sauvegardée : {GLOBAL_MEMORY_FILE}")
+    except Exception as e:
+        print(f"⚠️ Impossible de sauvegarder la mémoire globale : {type(e).__name__} : {e}")
     terminer_tache(5, details=f"{len(ia_resultats)} candidats traités")
 
     # Les candidats que l'IA déclare NON_PERTINENT restent dans
