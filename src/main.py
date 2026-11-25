@@ -85,6 +85,18 @@ MEMORY_REFRESH_DAYS = int(os.getenv("MEMORY_REFRESH_DAYS", "7"))
 SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
 SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
 
+# ============================================================
+# ARCHIVAGE DES RECHERCHES
+# ============================================================
+# Les recherches brutes et les recherches approfondies sont isolées
+# du reste des sorties. Une mémoire dédiée empêche d'ajouter plusieurs
+# fois exactement la même recherche.
+RECHERCHES_DIR = DATA / "recherches"
+RECHERCHES_RSS_DIR = RECHERCHES_DIR / "rss"
+RECHERCHES_APPROFONDIES_DIR = RECHERCHES_DIR / "approfondies"
+MEMOIRE_RECHERCHES_FILE = RECHERCHES_DIR / "recherches_analysees.json"
+MEMOIRE_APPROFONDIES_FILE = RECHERCHES_DIR / "recherches_approfondies_analysees.json"
+
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
@@ -251,7 +263,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-25-v18-memoire-globale-3-recherches-teams"
+VERSION_PROGRAMME = "2026-11-25-v20-recherches-separees-memoire"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -1142,6 +1154,138 @@ def _signature_memoire(resultat):
     }
     brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+
+
+def _empreinte_recherche(resultat):
+    """Identifie une recherche indépendamment de son ordre dans le flux."""
+    base = {
+        "url": canoniser_url(
+            resultat.get("url")
+            or resultat.get("url_reelle")
+            or resultat.get("url_finale")
+        ),
+        "titre": normaliser(
+            resultat.get("titre_page")
+            or resultat.get("titre")
+            or ""
+        ),
+        "description": normaliser(resultat.get("description", ""))[:5000],
+        "departement": str(resultat.get("departement", "")).strip(),
+        "annee": str(
+            resultat.get("annee_detectee")
+            or resultat.get("annee_recherchee")
+            or ""
+        ).strip(),
+        "source": normaliser(resultat.get("source", "")),
+    }
+    brut = json.dumps(base, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(brut.encode("utf-8")).hexdigest()
+
+
+def _charger_index_recherches(path):
+    """Charge l'index des recherches déjà archivées."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("items"), dict):
+            return data["items"]
+    except Exception as e:
+        print(f"⚠️ Index de recherches illisible ({path.name}) : {type(e).__name__} : {e}")
+    return {}
+
+
+def _sauvegarder_index_recherches(path, index):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "items": index,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def archiver_recherches_uniques(resultats, type_recherche="rss"):
+    """
+    Archive uniquement les recherches jamais archivées auparavant.
+
+    type_recherche:
+      - rss : résultats de recherche/collecte
+      - approfondie : résultats après recherche approfondie de la page
+    """
+    if not resultats:
+        return {"nouveaux": 0, "deja_connus": 0, "fichier": ""}
+
+    if type_recherche == "approfondie":
+        dossier = RECHERCHES_APPROFONDIES_DIR
+        index_path = MEMOIRE_APPROFONDIES_FILE
+        prefixe = "approfondies"
+    else:
+        dossier = RECHERCHES_RSS_DIR
+        index_path = MEMOIRE_RECHERCHES_FILE
+        prefixe = "recherches"
+
+    dossier.mkdir(parents=True, exist_ok=True)
+    index = _charger_index_recherches(index_path)
+
+    nouveaux = []
+    deja_connus = 0
+    maintenant = datetime.now().isoformat(timespec="seconds")
+
+    for resultat in resultats:
+        if not isinstance(resultat, dict):
+            continue
+
+        empreinte = _empreinte_recherche(resultat)
+        if not empreinte:
+            continue
+
+        if empreinte in index:
+            deja_connus += 1
+            continue
+
+        # On copie le résultat pour ne jamais modifier le résultat traité.
+        copie = dict(resultat)
+        nouveaux.append(copie)
+        index[empreinte] = {
+            "date_premiere_analyse": maintenant,
+            "titre": copie.get("titre_page") or copie.get("titre", ""),
+            "url": canoniser_url(
+                copie.get("url")
+                or copie.get("url_reelle")
+                or copie.get("url_finale")
+            ),
+            "departement": copie.get("departement", ""),
+            "annee": copie.get("annee_detectee") or copie.get("annee_recherchee", ""),
+        }
+
+    fichier = ""
+    if nouveaux:
+        fichier_path = dossier / f"{prefixe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        fichier_path.write_text(
+            json.dumps(nouveaux, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        fichier = str(fichier_path)
+
+    _sauvegarder_index_recherches(index_path, index)
+
+    print(
+        f"🗂️ Recherches {type_recherche} : "
+        f"{len(nouveaux)} nouvelles archivées / {deja_connus} déjà analysées"
+    )
+    return {
+        "nouveaux": len(nouveaux),
+        "deja_connus": deja_connus,
+        "fichier": fichier,
+    }
 
 
 def _cle_memoire_globale(resultat):
@@ -2235,6 +2379,25 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
     # 2) Mémoire IA détaillée : réutilisation des enrichissements déjà connus.
     candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats_a_verifier, memoire_ia)
     enrichir_candidats_ia(candidats_a_traiter)
+
+    # Archivage séparé des recherches approfondies.
+    # Seuls les résultats réellement nouveaux/modifiés sont ajoutés.
+    try:
+        stats_archivage_approfondi = archiver_recherches_uniques(
+            candidats_a_traiter,
+            type_recherche="approfondie",
+        )
+        print(
+            f"📁 Dossier recherches approfondies : {RECHERCHES_APPROFONDIES_DIR} | "
+            f"nouvelles={stats_archivage_approfondi['nouveaux']} | "
+            f"déjà analysées={stats_archivage_approfondi['deja_connus']}"
+        )
+    except Exception as e:
+        print(
+            f"⚠️ Archivage des recherches approfondies non généré : "
+            f"{type(e).__name__} : {e}"
+        )
+
     for candidat in candidats_a_traiter:
         try:
             candidat.update(calculer_score(candidat))
@@ -2624,6 +2787,8 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, non
     """Génère les fichiers d'audit et, si configuré, la notification Teams."""
     DATA.mkdir(exist_ok=True)
     OUTPUT.mkdir(exist_ok=True)
+    RECHERCHES_RSS_DIR.mkdir(parents=True, exist_ok=True)
+    RECHERCHES_APPROFONDIES_DIR.mkdir(parents=True, exist_ok=True)
     lignes_delta = []
     for type_delta, groupe in (
         ("nouveau_pertinent", delta["nouveaux_pertinents"]),
@@ -2970,6 +3135,21 @@ def main():
         print(f"⚠️ Journal de recherche non généré : {type(e).__name__} : {e}")
 
     resultats_bruts = externes + resultats_bruts
+
+    # Archivage séparé des recherches : les résultats déjà analysés
+    # ne sont pas réajoutés dans le dossier historique.
+    try:
+        stats_archivage_rss = archiver_recherches_uniques(
+            resultats_bruts,
+            type_recherche="rss",
+        )
+        print(
+            f"📁 Dossier recherches RSS : {RECHERCHES_RSS_DIR} | "
+            f"nouvelles={stats_archivage_rss['nouveaux']} | "
+            f"déjà analysées={stats_archivage_rss['deja_connus']}"
+        )
+    except Exception as e:
+        print(f"⚠️ Archivage des recherches RSS non généré : {type(e).__name__} : {e}")
 
     print()
     print("========================================")
