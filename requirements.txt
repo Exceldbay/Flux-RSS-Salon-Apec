@@ -8,3 +8,5 @@ PyYAML
 python-dateutil
 google-genai
 googlenewsdecoder
+python-docx
+reportlab
