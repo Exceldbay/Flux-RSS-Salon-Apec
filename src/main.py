@@ -81,6 +81,10 @@ OUTPUT = ROOT / "output"
 IA_MEMORY_FILE = DATA / "ia_memoire.json"
 IA_MEMORY_VERSION = "v1"
 
+# Fichiers de suivi des tâches du workflow
+SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
+SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
+
 MAX_WORKERS = 16
 TIMEOUT = 10
 MAX_RETRIES = 2
