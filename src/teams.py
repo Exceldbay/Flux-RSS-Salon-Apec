@@ -9,6 +9,7 @@ import requests
 TEAMS_WEBHOOK_ENV = "TEAMS_PRIVATE_WEBHOOK_URL"
 TEAMS_STATE_FILE = "teams_last_sent.txt"
 TEAMS_MIN_INTERVAL_HOURS = 20
+TEAMS_FORCE_SEND_ENV = "TEAMS_FORCE_SEND"
 
 
 def _clean(value, limit=240):
@@ -22,17 +23,6 @@ def _url(resultat):
 
 def _date(resultat):
     return resultat.get("date_evenement_page") or resultat.get("date_ia") or "date non précisée"
-
-
-def diagnostic_teams(state_file: Path):
-    """Retourne l'état du système Teams sans exposer le secret."""
-    webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
-    return {
-        "secret_present": bool(webhook),
-        "force_send": os.getenv("TEAMS_FORCE_SEND", "false"),
-        "etat_recent": _etat_recent(state_file),
-        "state_file": str(state_file),
-    }
 
 
 def construire_resume_teams(delta, stats, meta, taches=None):
@@ -244,27 +234,23 @@ def _etat_recent(path: Path):
 
 
 def envoyer_teams(card, state_file: Path):
-    """Envoie la synthèse Teams via un webhook Workflows.
+    """Envoie une seule synthèse Teams au maximum toutes les 20 h.
 
-    Le workflow peut être déclenché manuellement avec TEAMS_FORCE_SEND=true
-    pour tester l'envoi sans attendre l'expiration du délai de 20 h.
+    Sans secret TEAMS_PRIVATE_WEBHOOK_URL, le système reste silencieux et le workflow
+    continue normalement. Le webhook doit pointer vers un workflow Teams
+    configuré pour publier le message dans une conversation privée avec le propriétaire du workflow.
     """
     webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
-    force_send = os.getenv("TEAMS_FORCE_SEND", "false").strip().lower() in {
-        "1", "true", "yes", "oui"
-    }
-
     if not webhook:
-        return {
-            "envoye": False,
-            "raison": "secret TEAMS_PRIVATE_WEBHOOK_URL absent",
-        }
+        return {"envoye": False, "raison": "secret TEAMS_PRIVATE_WEBHOOK_URL absent"}
 
-    recent = _etat_recent(state_file)
-    if recent and not force_send:
+    force = os.getenv(TEAMS_FORCE_SEND_ENV, "").strip().lower() in {"1", "true", "yes", "oui"}
+
+    if _etat_recent(state_file) and not force:
         return {
             "envoye": False,
             "raison": "notification déjà envoyée dans les 20 dernières heures",
+            "force": False,
         }
 
     try:
@@ -274,34 +260,40 @@ def envoyer_teams(card, state_file: Path):
             headers={"Content-Type": "application/json"},
             timeout=20,
         )
+        body = _clean(response.text, 500)
+        diagnostic = {
+            "horodatage": datetime.now().isoformat(timespec="seconds"),
+            "http_status": response.status_code,
+            "force": force,
+            "reponse": body,
+        }
 
         if response.status_code >= 400:
-            detail = _clean(response.text, 500)
-            if response.status_code in (404, 410):
-                detail += (
-                    " | Vérifier que l'URL provient bien d'un Workflow Teams "
-                    "'When a Teams webhook request is received' et non d'un ancien "
-                    "Office 365 Connector."
-                )
             return {
                 "envoye": False,
-                "raison": f"Teams HTTP {response.status_code}: {detail}",
+                "raison": f"Teams HTTP {response.status_code}: {body}",
+                "diagnostic": diagnostic,
             }
 
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(
             datetime.now().isoformat(timespec="seconds"),
-            encoding="utf-8",
+            encoding="utf-8"
         )
         return {
             "envoye": True,
-            "raison": "message Teams envoyé via le webhook Workflows",
+            "raison": "message Teams privé envoyé",
+            "diagnostic": diagnostic,
         }
-
     except Exception as e:
         return {
             "envoye": False,
             "raison": f"erreur Teams {type(e).__name__}: {e}",
+            "diagnostic": {
+                "horodatage": datetime.now().isoformat(timespec="seconds"),
+                "force": force,
+                "exception": f"{type(e).__name__}: {e}",
+            },
         }
 
 
