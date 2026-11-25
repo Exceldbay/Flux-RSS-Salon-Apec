@@ -2,6 +2,12 @@ name: Veille APEC
 
 on:
   workflow_dispatch:
+    inputs:
+      force_teams:
+        description: "Forcer l'envoi Teams même si une notification a déjà été envoyée dans les 20 dernières heures"
+        required: false
+        default: false
+        type: boolean
 
   schedule:
     # Tous les jours à 06h00 UTC
@@ -51,6 +57,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
+          TEAMS_FORCE_SEND: ${{ inputs.force_teams || false }}
         run: |
           echo "========================================"
           echo "VÉRIFICATION DES SECRETS"
@@ -71,12 +78,46 @@ jobs:
           echo "========================================"
 
       # ============================================================
+      # 5. VÉRIFICATION TEAMS + ARCHIVAGE
+      # ============================================================
+      - name: 📨 Vérification Teams et mémoire des recherches
+        if: always()
+        env:
+          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
+          TEAMS_FORCE_SEND: ${{ inputs.force_teams || false }}
+        run: |
+          echo "========================================"
+          echo "VÉRIFICATION TEAMS"
+          echo "========================================"
+          if [ -f "src/teams.py" ]; then
+            echo "✅ src/teams.py présente"
+          elif [ -f "teams.py" ]; then
+            echo "✅ teams.py présente à la racine"
+          else
+            echo "❌ teams.py introuvable"
+          fi
+
+          if [ -n "$TEAMS_PRIVATE_WEBHOOK_URL" ]; then
+            echo "✅ Webhook Teams configuré"
+          else
+            echo "❌ Webhook Teams absent"
+          fi
+
+          echo "Force Teams : ${TEAMS_FORCE_SEND}"
+          echo ""
+          echo "--- dossiers de recherches ---"
+          test -d "data/recherches/rss" && echo "✅ data/recherches/rss" || echo "ℹ️ sera créé par Python"
+          test -d "data/recherches/approfondies" && echo "✅ data/recherches/approfondies" || echo "ℹ️ sera créé par Python"
+          echo "========================================"
+
+      # ============================================================
       # 5. EXÉCUTION DE LA VEILLE
       # ============================================================
       - name: 🔎 Lancement de la veille APEC
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
+          TEAMS_FORCE_SEND: ${{ inputs.force_teams || false }}
           PYTHONUNBUFFERED: "1"
 
         run: |
