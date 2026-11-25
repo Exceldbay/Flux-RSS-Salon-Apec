@@ -2,79 +2,150 @@ name: Veille APEC
 
 on:
   workflow_dispatch:
+
   schedule:
-    - cron: "0 5 * * *"
+    # Tous les jours à 06h00 UTC
+    - cron: "0 6 * * *"
 
 permissions:
   contents: write
 
-concurrency:
-  group: veille-apec
-  cancel-in-progress: false
-
 jobs:
-  recherche:
+  veille-apec:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL_31: "gemini-3.1-flash-lite"
-      GEMINI_MODEL_38: "gemini-3.8-flash"
-      SEUIL_GEMINI: "24"
-      MAX_GEMINI_38_ANALYSES: "5"
-      GEMINI_31_COOLDOWN_SECONDS: "15"
-      GEMINI_38_COOLDOWN_SECONDS: "60"
 
     steps:
-      - name: Récupérer le dépôt
+      # ============================================================
+      # 1. RÉCUPÉRATION DU DÉPÔT
+      # ============================================================
+      - name: 📥 Checkout du dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Installer Python
+      # ============================================================
+      # 2. INSTALLATION PYTHON
+      # ============================================================
+      - name: 🐍 Installation de Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Installer les dépendances
+      # ============================================================
+      # 3. INSTALLATION DES DÉPENDANCES
+      # ============================================================
+      - name: 📦 Installation des dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Afficher la configuration IA
+      # ============================================================
+      # 4. VÉRIFICATION DES SECRETS
+      # ============================================================
+      - name: 🔐 Vérification des secrets
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
         run: |
           echo "========================================"
-          echo "CONFIGURATION GEMINI"
+          echo "VÉRIFICATION DES SECRETS"
           echo "========================================"
-          echo "Modèle base       : $GEMINI_MODEL_31"
-          echo "Modèle enrichissement : $GEMINI_MODEL_38"
-          echo "Seuil Python      : $SEUIL_GEMINI"
-          echo "3.1                : illimité"
-          echo "Cooldown 3.1       : $GEMINI_31_COOLDOWN_SECONDS s"
-          echo "3.8                : max $MAX_GEMINI_38_ANALYSES"
-          echo "Cooldown 3.8       : $GEMINI_38_COOLDOWN_SECONDS s"
 
-      - name: Lancer le programme
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "✅ GEMINI_API_KEY : présente"
+          else
+            echo "⚠️ GEMINI_API_KEY : absente"
+          fi
+
+          if [ -n "$TEAMS_PRIVATE_WEBHOOK_URL" ]; then
+            echo "✅ TEAMS_PRIVATE_WEBHOOK_URL : présente"
+          else
+            echo "⚠️ TEAMS_PRIVATE_WEBHOOK_URL : absente"
+          fi
+
+          echo "========================================"
+
+      # ============================================================
+      # 5. EXÉCUTION DE LA VEILLE
+      # ============================================================
+      - name: 🔎 Lancement de la veille APEC
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
+          PYTHONUNBUFFERED: "1"
+
         run: |
-          python -u src/main.py
+          echo "========================================"
+          echo "VEILLE APEC"
+          echo "========================================"
+          echo "Date : $(date '+%d/%m/%Y %H:%M:%S')"
+          echo "========================================"
 
-      - name: Enregistrer les résultats
+          python src/main.py
+
+      # ============================================================
+      # 6. VÉRIFICATION DES FICHIERS PRODUITS
+      # ============================================================
+      - name: 📊 Vérification des sorties
+        if: always()
+        run: |
+          echo "========================================"
+          echo "FICHIERS PRODUITS"
+          echo "========================================"
+
+          echo ""
+          echo "--- data/ ---"
+          ls -lah data/ 2>/dev/null || true
+
+          echo ""
+          echo "--- output/ ---"
+          ls -lah output/ 2>/dev/null || true
+
+          echo ""
+          echo "--- mémoire IA ---"
+          if [ -f "data/ia_memoire.json" ]; then
+            echo "✅ data/ia_memoire.json présente"
+          else
+            echo "⚠️ data/ia_memoire.json absente"
+          fi
+
+          echo ""
+          echo "--- Excel ---"
+          if [ -f "data/Apec_Salons_Evenements.xlsx" ]; then
+            echo "✅ Apec_Salons_Evenements.xlsx présente"
+          else
+            echo "⚠️ Fichier Excel absent"
+          fi
+
+          echo "========================================"
+
+      # ============================================================
+      # 7. COMMIT DES DONNÉES ET DE LA MÉMOIRE
+      # ============================================================
+      - name: 💾 Sauvegarde des résultats
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/ output/
-          if git diff --cached --quiet; then
-            echo "Aucune modification à enregistrer"
-            exit 0
-          fi
-          git commit -m "Mise à jour automatique de la veille"
-          git fetch origin main
-          git rebase origin/main
-          git push origin HEAD:main
 
-      - name: Fin du workflow
+          git add data/ output/ 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ Aucun changement à sauvegarder."
+          else
+            git commit -m "🔄 Mise à jour automatique veille APEC"
+            git push
+            echo "✅ Résultats sauvegardés dans GitHub."
+          fi
+
+      # ============================================================
+      # 8. RÉSUMÉ FINAL
+      # ============================================================
+      - name: ✅ Résumé
+        if: always()
         run: |
           echo "========================================"
-          echo "VEILLE APEC TERMINÉE"
+          echo "WORKFLOW TERMINÉ"
+          echo "========================================"
+          echo "Statut GitHub Actions : ${{ job.status }}"
           echo "========================================"
