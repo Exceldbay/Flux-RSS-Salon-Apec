@@ -2259,12 +2259,20 @@ def calculer_delta_veille(ancienne, actuels):
     promus_pertinents.sort(key=lambda x: -int(x.get("score", 0) or 0))
     nouveaux_a_verifier_2027.sort(key=lambda x: -int(x.get("score", 0) or 0))
 
+    # Les ajouts utiles correspondent aux lignes nouvelles que le pipeline
+    # est susceptible d'intégrer au classeur Excel. Les non-pertinents ne
+    # sont volontairement jamais comptés comme ajouts.
+    ajouts_tableur = nouveaux_pertinents + nouveaux_a_verifier_2027
+    modifications_tableur = promus_pertinents + evolutions
+
     return {
         "nouveaux_pertinents": nouveaux_pertinents,
         "promus_pertinents": promus_pertinents,
         "nouveaux_a_verifier_2027": nouveaux_a_verifier_2027,
         "evolutions_utiles": len(evolutions),
         "evolutions": evolutions,
+        "ajouts_tableur": ajouts_tableur,
+        "modifications_tableur": modifications_tableur,
         "premiere_veille": not bool(ancienne),
     }
 
@@ -2352,11 +2360,23 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_
 
     meta = {
         "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "requetes": len(requetes) if "requetes" in globals() else 0,
+        "resultats_rss": meta_resultats.get("resultats_rss", 0) if "meta_resultats" in locals() else 0,
+        "resultats_externes": meta_resultats.get("resultats_externes", 0) if "meta_resultats" in locals() else 0,
+        "resultats_bruts": len(resultats_bruts),
+        "resultats_conserves": len(pertinents) + len(a_verifier) + len(non_pertinents),
+        "candidats_ia": len(ia_resultats),
         "pertinents": len(pertinents),
         "a_verifier": len(a_verifier),
+        "non_pertinents": len(non_pertinents),
+        "excel_synchronise": meta_resultats.get("excel_synchronise", "NON") if "meta_resultats" in globals() else "NON",
         "ia_analysees": sum(1 for r in ia_resultats if r.get("ia_analyse") == "OUI"),
         "ia_memoire": sum(1 for r in ia_resultats if r.get("ia_analyse") == "MEMOIRE"),
         "ia_non_analyse": sum(1 for r in ia_resultats if r.get("decision_ia") == "IA_NON_ANALYSE"),
+        "gemini_31": sum(1 for r in ia_resultats if str(r.get("modele_ia_31", "")).strip()),
+        "gemini_38": sum(1 for r in ia_resultats if str(r.get("modele_ia_38", "")).strip()),
+        "gemini_31_cooldown": 10,
+        "gemini_38_cooldown": 60,
         "quota_bloque": "OUI" if any(str(r.get("decision_ia", "")) == "IA_INDISPONIBLE" for r in ia_resultats) else "NON",
         "taches_terminees": resume_taches["terminees"],
         "taches_total": resume_taches["total"],
@@ -2366,7 +2386,7 @@ def executer_sorties_v8_v10(delta, stats_operateurs, pertinents, a_verifier, ia_
         "gemini_model": "gemini-3.1-flash-lite → gemini-3.8-flash",
         "gemini_score_min": GEMINI_SCORE_MIN,
         "gemini_max_analyses": "3.1 illimité / 3.8 max 5",
-        "gemini_cooldown": "3.1: 15 s / 3.8: 60 s",
+        "gemini_cooldown": "3.1: 10 s / 3.8: 60 s",
     })
     card = construire_resume_teams(delta, stats_operateurs, meta, _SUIVI_TACHES)
     sauvegarder_payload(card, OUTPUT / "teams_payload.json")
@@ -2566,6 +2586,7 @@ def sauvegarder(
 # ============================================================
 
 def main():
+    global meta_resultats
 
     debut_total = time.time()
 
@@ -2735,18 +2756,16 @@ def main():
     else:
         echouer_tache(8, "Sauvegarde refusée ou aucun résultat")
 
-    demarrer_tache(10)
-    sorties_v10 = executer_sorties_v8_v10(
-        delta, stats_operateurs, pertinents, a_verifier, ia_resultats
-    )
-
-    if sorties_v10.get("envoye"):
-        terminer_tache(11, details=sorties_v10.get("raison", ""))
-    else:
-        terminer_tache(11, "TERMINEE", details=sorties_v10.get("raison", ""))
+    # Métadonnées de collecte utilisées par le rapport Teams.
+    meta_resultats = {
+        "resultats_rss": len(resultats_bruts) - len(externes),
+        "resultats_externes": len(externes),
+    }
 
     synchronisation_ok = False
 
+    # Le rapport Teams est envoyé APRÈS la synchronisation Excel afin de
+    # pouvoir annoncer honnêtement ce qui a réellement été intégré au classeur.
     demarrer_tache(9)
     if sauvegarde_ok:
         try:
@@ -2760,7 +2779,18 @@ def main():
     else:
         terminer_tache(9, "NON EXECUTEE", details="Sauvegarde CSV non validée")
 
-    terminer_tache(10, details="Payload Teams préparé et notification traitée")
+    meta_resultats["excel_synchronise"] = "OUI" if synchronisation_ok else "NON"
+
+    demarrer_tache(10)
+    sorties_v10 = executer_sorties_v8_v10(
+        delta, stats_operateurs, pertinents, a_verifier, ia_resultats
+    )
+
+    terminer_tache(10, details="Payload Teams préparé")
+    if sorties_v10.get("envoye"):
+        terminer_tache(11, details=sorties_v10.get("raison", ""))
+    else:
+        terminer_tache(11, "TERMINEE", details=sorties_v10.get("raison", ""))
     sauvegarder_suivi_taches()
     duree_total = time.time() - debut_total
 
