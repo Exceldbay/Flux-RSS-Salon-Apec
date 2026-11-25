@@ -6,7 +6,7 @@ from pathlib import Path
 import requests
 
 
-TEAMS_WEBHOOK_ENV = "TEAMS_WEBHOOK_URL"
+TEAMS_WEBHOOK_ENV = "TEAMS_PRIVATE_WEBHOOK_URL"
 TEAMS_STATE_FILE = "teams_last_sent.txt"
 TEAMS_MIN_INTERVAL_HOURS = 20
 
@@ -235,12 +235,13 @@ def _etat_recent(path: Path):
 def envoyer_teams(card, state_file: Path):
     """Envoie une seule synthèse Teams au maximum toutes les 20 h.
 
-    Sans secret TEAMS_WEBHOOK_URL, le système reste silencieux et le workflow
-    continue normalement.
+    Sans secret TEAMS_PRIVATE_WEBHOOK_URL, le système reste silencieux et le workflow
+    continue normalement. Le webhook doit pointer vers un workflow Teams
+    configuré pour publier le message dans une conversation privée avec le propriétaire du workflow.
     """
     webhook = os.getenv(TEAMS_WEBHOOK_ENV, "").strip()
     if not webhook:
-        return {"envoye": False, "raison": "secret TEAMS_WEBHOOK_URL absent"}
+        return {"envoye": False, "raison": "secret TEAMS_PRIVATE_WEBHOOK_URL absent"}
 
     if _etat_recent(state_file):
         return {"envoye": False, "raison": "notification déjà envoyée dans les 20 dernières heures"}
@@ -259,7 +260,7 @@ def envoyer_teams(card, state_file: Path):
             }
         state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
-        return {"envoye": True, "raison": "notification Teams envoyée"}
+        return {"envoye": True, "raison": "message Teams privé envoyé"}
     except Exception as e:
         return {"envoye": False, "raison": f"erreur Teams {type(e).__name__}: {e}"}
 
