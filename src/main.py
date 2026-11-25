@@ -262,7 +262,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-25-v23-bdd-historique-teams-diagnostic"
+VERSION_PROGRAMME = "2026-11-25-v24-bdd-candidats-corrige"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -2181,7 +2181,7 @@ def classer_statut_final(resultat, decision):
 # COUCHE IA GEMINI
 # ============================================================
 
-def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
+def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     """Cascade IA avec mémoire persistante : 3.1 uniquement pour les nouveautés.
 
     Les événements identiques déjà enrichis lors d'une run précédente sont
@@ -2189,6 +2189,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None):
     Gemini 3.8. Les nouveaux/modifiés passent dans la cascade normale.
     """
     memoire_ia = memoire_ia or {}
+    bdd_candidats = bdd_candidats or preparer_bdd_candidats()
     tous_candidats = pertinents + a_verifier
 
     candidats = []
@@ -3085,6 +3086,16 @@ def enregistrer_candidats_bdd(resultats, bdd):
     now = datetime.now().isoformat(timespec="seconds")
 
     for resultat in resultats:
+        # Un candidat déjà réutilisé depuis la BDD ne doit pas être réécrit
+        # ni compter comme une nouvelle analyse à chaque run.
+        if resultat.get("bdd_reutilise") is True:
+            continue
+        # On ne fige dans la BDD que les candidats réellement analysés.
+        # Une IA indisponible ou une analyse interrompue doit pouvoir être
+        # retentée lors de la prochaine run.
+        if resultat.get("ia_analyse") not in {"OUI", "MEMOIRE"}:
+            continue
+
         cle = resultat.get("bdd_cle") or _cle_stable_candidat(resultat)
         entree = items.get(cle, {})
         ancienne_signature = entree.get("signature_source", "")
@@ -3440,7 +3451,31 @@ def main():
     # --------------------------------------------------------
     demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
     memoire_ia = charger_memoire_ia()
-    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(pertinents, a_verifier, memoire_ia)
+    pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
+        pertinents,
+        a_verifier,
+        memoire_ia,
+        bdd_candidats,
+    )
+
+    # La BDD candidats est alimentée uniquement après une analyse terminée.
+    # Les candidats nouveaux/modifiés sont ainsi disponibles à la prochaine
+    # run, tandis que les candidats inchangés seront réutilisés sans nouvel
+    # appel HTTP/Gemini.
+    try:
+        enregistrer_candidats_bdd(ia_resultats, bdd_candidats)
+        stats_bdd_candidats["taille_apres_run"] = len(bdd_candidats.get("items", {}))
+        stats_bdd_candidats["analyses_enregistrees"] = sum(
+            1 for r in ia_resultats
+            if r.get("ia_analyse") in {"OUI", "MEMOIRE"} and not r.get("bdd_reutilise")
+        )
+        print(
+            f"🗃️ BDD candidats sauvegardée : {stats_bdd_candidats['taille_apres_run']} candidats | "
+            f"{stats_bdd_candidats['analyses_enregistrees']} analyses enregistrées"
+        )
+    except Exception as e:
+        print(f"⚠️ BDD candidats non sauvegardée : {type(e).__name__} : {e}")
+
     try:
         sauvegarder_memoire_ia(ia_resultats, memoire_ia)
         print(f"🧠 Mémoire IA sauvegardée : {IA_MEMORY_FILE}")
