@@ -67,6 +67,9 @@ NON_PERTINENT si public lycée/collège, job étudiant/saisonnier, petits boulot
 
 NE JAMAIS INVENTER. Si l'information n'est pas dans les données, écris INCONNU.
 
+PREUVE OBLIGATOIRE
+La raison doit reprendre un élément réellement présent dans le titre, la description, la page enrichie ou les signaux Python. Une décision PERTINENT sans preuve textuelle explicite de cible doit être A_VERIFIER.
+
 DONNÉES STRUCTURÉES
 Score Python : {resultat.get('score',0)}
 Statut Python : {resultat.get('statut','')}
@@ -123,7 +126,7 @@ def _normaliser_decision(data):
 
 
 def _base_resultat_indisponible(message, modele):
-    return {"decision_ia":"IA_INDISPONIBLE","confiance_ia":0,"raison_ia":message,"categorie_ia":"","date_ia":"","departement_ia":"","modele_ia":modele}
+    return {"decision_ia":"IA_INDISPONIBLE","confiance_ia":0,"raison_ia":message,"categorie_ia":"","date_ia":"","departement_ia":"","modele_ia":modele,"modele_ia_1":modele,"decision_ia_1":"IA_INDISPONIBLE","confiance_ia_1":0,"raison_ia_1":message}
 
 
 def analyser_resultat_31(resultat):
@@ -135,7 +138,7 @@ def analyser_resultat_31(resultat):
         client=genai.Client(api_key=api_key)
         data=_appel_modele(client, MODEL_31, _construire_prompt_31(resultat))
         decision, confiance=_normaliser_decision(data)
-        return {"decision_ia":decision,"confiance_ia":confiance,"raison_ia":data.get("raison",""),"categorie_ia":data.get("categorie",""),"date_ia":data.get("date",""),"departement_ia":data.get("departement",""),"modele_ia":MODEL_31,"modele_ia_1":MODEL_31,"decision_ia_1":decision,"confiance_ia_1":confiance,"raison_ia_1":data.get("raison","")}
+        return {"decision_ia":decision,"confiance_ia":confiance,"raison_ia":data.get("raison",""),"categorie_ia":data.get("categorie",""),"date_ia":data.get("date",""),"departement_ia":data.get("departement",""),"modele_ia":MODEL_31,"modele_ia_1":MODEL_31,"decision_ia_1":decision,"confiance_ia_1":confiance,"raison_ia_1":data.get("raison",""),"public_cible_ia":data.get("public_cible",""),"preuve_cible_ia":data.get("preuve_cible",""),"type_evenement_ia":data.get("type_evenement",""),"preuve_ia":data.get("preuve","INCONNUE") }
     except genai_errors.APIError as e:
         return _base_resultat_indisponible(f"Gemini 3.1 HTTP {getattr(e,'code','?')} : {str(getattr(e,'message',str(e)))[:500]}", MODEL_31)
     except Exception as e:
@@ -206,7 +209,7 @@ def analyser_resultat_38(resultat, analyse31):
         except (TypeError, ValueError):
             confiance = 0
         confiance = max(0, min(100, confiance))
-        return {"modele_ia_2":MODEL_38,"decision_ia_2":"ARBITRAGE_OK","arbitrage_38":arbitrage,"confiance_ia_2":confiance,"raison_ia_2":data.get("raison",""),"enrichissement_38":data.get("enrichissement",""),"priorite_38":data.get("priorite_38","")}
+        return {"modele_ia_2":MODEL_38,"modele_ia_38":MODEL_38,"decision_ia_2":"ARBITRAGE_OK","decision_ia_38":arbitrage,"arbitrage_38":arbitrage,"confiance_ia_2":confiance,"confiance_ia_38":confiance,"raison_ia_2":data.get("raison",""),"raison_ia_38":data.get("raison",""),"enrichissement_38":data.get("enrichissement",""),"priorite_38":data.get("priorite_38","")}
     except genai_errors.APIError as e:
         return {"modele_ia_2":MODEL_38,"decision_ia_2":"IA_INDISPONIBLE","confiance_ia_2":0,"raison_ia_2":f"Gemini 3.8 HTTP {getattr(e,'code','?')} : {str(getattr(e,'message',str(e)))[:500]}","enrichissement_38":""}
     except Exception as e:
