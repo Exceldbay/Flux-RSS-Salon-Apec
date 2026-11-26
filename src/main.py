@@ -96,6 +96,7 @@ HISTORIQUE_MAX_LIGNES_PAR_FICHIER = int(os.getenv("HISTORIQUE_MAX_LIGNES_PAR_FIC
 # (CSV + DOCX + PDF) pour garder une trace exploitable sans faire grossir
 # inutilement le dépôt Git. Les fichiers Teams temporaires sont supprimés.
 OUTPUT_KEEP_JOURNAL_RUNS = int(os.getenv("OUTPUT_KEEP_JOURNAL_RUNS", "7"))
+OUTPUT_KEEP_LOG_RUNS = int(os.getenv("OUTPUT_KEEP_LOG_RUNS", "30"))
 OUTPUT_TRANSIENT_FILES = {"teams_payload.json", "teams_result.json"}
 
 def nettoyer_output():
@@ -132,7 +133,22 @@ def nettoyer_output():
                     supprimes += 1
                 except OSError as exc:
                     print(f"⚠️ Impossible de supprimer {f.name}: {exc}")
-        print(f"🧹 Nettoyage output : {supprimes} fichier(s) supprimé(s), {len(a_conserver)} lot(s) de journaux conservé(s).")
+
+        # Conservation séparée des logs d'exécution : 30 runs complets par défaut.
+        logs_dir = OUTPUT / "logs"
+        if logs_dir.exists():
+            dossiers = sorted(
+                [d for d in logs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
+                key=lambda d: d.name, reverse=True,
+            )
+            for ancien in dossiers[max(0, OUTPUT_KEEP_LOG_RUNS):]:
+                try:
+                    import shutil
+                    shutil.rmtree(ancien)
+                    supprimes += 1
+                except OSError as exc:
+                    print(f"⚠️ Impossible de supprimer le log {ancien.name}: {exc}")
+        print(f"🧹 Nettoyage output : {supprimes} élément(s) supprimé(s), {len(a_conserver)} lot(s) de journaux et {OUTPUT_KEEP_LOG_RUNS} runs de logs conservés.")
     except Exception as exc:
         print(f"⚠️ Nettoyage output ignoré : {type(exc).__name__}: {exc}")
 
@@ -178,6 +194,67 @@ thread_local = threading.local()
 JOURNAL_RECHERCHE = []
 JOURNAL_RECHERCHE_LOCK = threading.Lock()
 
+# Journal d'exécution propre à chaque run. Il est créé au démarrage du
+# programme et alimenté au fil de l'eau, y compris lorsque plusieurs workers
+# travaillent en parallèle.
+RUN_LOGGER = None
+
+class RunLogger:
+    def __init__(self, output_root):
+        self.started_at = datetime.now()
+        stamp = self.started_at.strftime("%Y-%m-%d_%H-%M-%S")
+        self.run_dir = output_root / "logs" / f"run_{stamp}"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.execution_path = self.run_dir / "execution.log"
+        self.lock = threading.Lock()
+        self._write_text(self.execution_path, f"{self._ts()} | START | run={self.run_dir.name}\n")
+        # Les fichiers sont créés dès le début du run, même si une étape
+        # ne produit aucune ligne. Cela permet de distinguer "aucune donnée"
+        # d'un fichier de log qui n'aurait jamais été initialisé.
+        headers = {
+            "requetes.csv": ["horodatage", "departement", "nom_departement", "annee", "categorie", "mot_cle", "complement", "lieu", "operateur_web", "famille_operateur", "statut", "nb_resultats", "duree_ms", "url_recherche", "tentative", "erreur"],
+            "candidats.csv": ["horodatage", "etape", "url", "titre", "departement", "annee", "score", "decision_python", "decision_ia", "statut_final", "ia_analyse", "bdd_reutilise"],
+            "recherches_web.csv": ["horodatage", "type", "url", "statut", "duree_ms", "erreur"],
+            "preuves.csv": ["horodatage", "url", "titre", "public_cible", "type_evenement", "niveau_preuve", "preuve_cible", "preuve_evenement", "preuve_date", "preuve_localisation", "qualite_source", "contradiction"],
+            "ia.csv": ["etape", "candidat", "titre", "decision", "confiance", "duree_ms", "statut"],
+            "erreurs.csv": ["horodatage", "etape", "type_erreur", "message", "url", "requete"],
+        }
+        for filename, cols in headers.items():
+            with open(self.run_dir / filename, "w", newline="", encoding="utf-8-sig") as f:
+                import csv
+                csv.writer(f).writerow(cols)
+
+    def _ts(self):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+    def _write_text(self, path, text):
+        with self.lock:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(text)
+
+    def event(self, stage, message="", **fields):
+        parts = [self._ts(), str(stage), str(message)]
+        for k, v in fields.items():
+            parts.append(f"{k}={str(v).replace(chr(10), ' ')}")
+        self._write_text(self.execution_path, " | ".join(parts) + "\n")
+
+    def row(self, filename, **fields):
+        path = self.run_dir / filename
+        with self.lock:
+            exists = path.exists()
+            with open(path, "a", newline="", encoding="utf-8-sig") as f:
+                import csv
+                if not fields:
+                    return
+                writer = csv.DictWriter(f, fieldnames=list(fields.keys()))
+                if not exists:
+                    writer.writeheader()
+                writer.writerow(fields)
+
+    def finish(self, status="OK", **fields):
+        self.event("END", status, **fields)
+
+
 def enregistrer_log_recherche(requete, **infos):
     """Ajoute une ligne au journal de recherche, de façon thread-safe."""
     ligne = {
@@ -195,6 +272,17 @@ def enregistrer_log_recherche(requete, **infos):
     ligne.update(infos)
     with JOURNAL_RECHERCHE_LOCK:
         JOURNAL_RECHERCHE.append(ligne)
+    if RUN_LOGGER is not None:
+        RUN_LOGGER.row("requetes.csv", **ligne)
+        RUN_LOGGER.event(
+            "RSS",
+            ligne.get("statut", ""),
+            requete=ligne.get("mot_cle", ""),
+            departement=ligne.get("departement", ""),
+            annee=ligne.get("annee", ""),
+            resultats=ligne.get("nb_resultats", 0),
+            duree_ms=ligne.get("duree_ms", ""),
+        )
 
 def nettoyer_texte_rapport(valeur):
     return " ".join(unescape(str(valeur or "")).replace("\n", " ").split())
@@ -1420,9 +1508,14 @@ def enrichir_page(resultat):
         return resultat
 
     try:
+        debut_web = time.time()
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.event("WEB", "ouverture_page", url=url)
         session = get_session()
         response = session.get(url, timeout=TIMEOUT, allow_redirects=True)
         response.raise_for_status()
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.row("recherches_web.csv", horodatage=datetime.now().isoformat(timespec="seconds"), type="page", url=url, statut="OK", duree_ms=round((time.time()-debut_web)*1000), erreur="")
 
         content_type = response.headers.get("Content-Type", "").lower()
         if "html" not in content_type:
@@ -2443,11 +2536,18 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
                 time.sleep(attente)
 
         print(f"[IA 3.1] {position}/{len(candidats_a_traiter)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.event("IA31", "appel", position=position, titre=court(resultat.get("titre", "")), url=resultat.get("url", ""))
+        debut_ia31 = time.time()
         analyse = analyser_resultat_31(resultat)
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.row("ia.csv", etape="3.1", candidat=resultat.get("url", ""), titre=court(resultat.get("titre", "")), decision=analyse.get("decision_ia", ""), confiance=analyse.get("confiance_ia", ""), duree_ms=round((time.time()-debut_ia31)*1000), statut="OK" if analyse.get("decision_ia") != "IA_INDISPONIBLE" else "ERREUR")
         dernier_appel_31 = time.time()
         appels_31 += 1
 
         resultat.update(analyse)
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.row("candidats.csv", horodatage=datetime.now().isoformat(timespec="seconds"), etape="ia31", url=resultat.get("url", ""), titre=court(resultat.get("titre", "")), departement=resultat.get("departement", ""), annee=resultat.get("annee_detectee", resultat.get("annee", "")), score=resultat.get("score", ""), decision_python=resultat.get("statut", ""), decision_ia=analyse.get("decision_ia", ""), statut_final="", ia_analyse="OUI", bdd_reutilise=resultat.get("bdd_reutilise", ""))
         resultat["ia_analyse"] = "OUI"
         resultat["memoire_ia"] = "NON"
         resultat["modele_ia_1"] = "gemini-3.1-flash-lite"
@@ -2526,7 +2626,12 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
                 time.sleep(attente)
 
         print(f"[IA 3.8] {position}/{len(top_38)} — ré-enrichissement — {court(resultat.get('titre', ''))}", flush=True)
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.event("IA38", "appel", position=position, titre=court(resultat.get("titre", "")), url=resultat.get("url", ""))
+        debut_ia38 = time.time()
         analyse38 = analyser_resultat_38(resultat, resultat)
+        if RUN_LOGGER is not None:
+            RUN_LOGGER.row("ia.csv", etape="3.8", candidat=resultat.get("url", ""), titre=court(resultat.get("titre", "")), decision=analyse38.get("arbitrage_38", ""), confiance=analyse38.get("confiance_ia_2", ""), duree_ms=round((time.time()-debut_ia38)*1000), statut="OK" if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE" else "ERREUR")
         dernier_appel_38 = time.time()
         appels_38 += 1
         resultat.update(analyse38)
@@ -3502,17 +3607,20 @@ def importer_historique_runs_dans_bdd(bdd):
 
 
 def main():
+    global RUN_LOGGER, meta_resultats
+    DATA.mkdir(exist_ok=True)
+    OUTPUT.mkdir(exist_ok=True)
+    with JOURNAL_RECHERCHE_LOCK:
+        JOURNAL_RECHERCHE.clear()
+    RUN_LOGGER = RunLogger(OUTPUT)
+    RUN_LOGGER.event("CONFIG", "demarrage_avant_bdd", version=VERSION_PROGRAMME, regles=REGLES_VERSION)
+
     bdd_candidats = preparer_bdd_candidats()
     stats_historique_runs = importer_historique_runs_dans_bdd(bdd_candidats)
     stats_bdd_candidats = {
         "taille_avant_run": len(bdd_candidats.get("items", {}))
     }
-    global meta_resultats
-
     debut_total = time.time()
-
-    DATA.mkdir(exist_ok=True)
-    OUTPUT.mkdir(exist_ok=True)
 
     print()
     print("========================================")
@@ -3529,16 +3637,20 @@ def main():
     sauvegarder_suivi_taches()
 
     ancienne_veille = charger_ancienne_veille()
+    RUN_LOGGER.event("MEMOIRE", "ancienne_veille_chargee", lignes=len(ancienne_veille))
 
     departements = load_yaml("departements.yml")
     requetes = construire_requetes(departements)
 
     print()
     print(f"Requêtes générées : {len(requetes)}")
+    RUN_LOGGER.event("CONFIG", "requetes_generees", total=len(requetes), departements=",".join(sorted(DEPARTEMENTS_CIBLES)))
 
     demarrer_tache(0, f"{len(requetes)} requêtes")
     try:
+        RUN_LOGGER.event("ETAPE", "collecte_rss_debut", total=len(requetes))
         resultats_bruts, erreurs = collecter(requetes)
+        RUN_LOGGER.event("ETAPE", "collecte_rss_fin", resultats=len(resultats_bruts), erreurs=erreurs)
         terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {erreurs} erreurs")
     except Exception as e:
         echouer_tache(0, str(e))
@@ -3561,6 +3673,7 @@ def main():
             {int(a) for a in departements["annees"] if int(a) >= ANNEE_MIN}
             | {ANNEE_PRIORITAIRE}
         )
+        RUN_LOGGER.event("ETAPE", "sources_externes_debut")
         externes = collecter_sources_externes(
             sources_yml=load_yaml_optionnel("sources.yml"),
             extra=load_yaml_optionnel("sources_collecte.yml"),
@@ -3575,17 +3688,21 @@ def main():
         externes = []
         terminer_tache(1, "ERREUR", erreur=f"{type(e).__name__}: {e}")
     else:
+        RUN_LOGGER.event("ETAPE", "sources_externes_fin", resultats=len(externes))
         terminer_tache(1, details=f"{len(externes)} résultats externes")
 
     # Export du journal de recherche après la collecte RSS + sources externes.
     try:
+        RUN_LOGGER.event("ETAPE", "rapport_recherche_debut")
         generer_rapports_recherche(
             requetes, resultats_bruts, erreurs,
             duree_collecte=time.time() - debut_total,
             resultats_externes=len(externes),
             erreurs_externes=0,
         )
+        RUN_LOGGER.event("ETAPE", "rapport_recherche_fin")
     except Exception as e:
+        RUN_LOGGER.event("ERROR", "rapport_recherche", erreur=f"{type(e).__name__}: {e}")
         print(f"⚠️ Journal de recherche non généré : {type(e).__name__} : {e}")
 
     resultats_bruts = externes + resultats_bruts
@@ -3607,9 +3724,30 @@ def main():
     # réutilise directement son score Python et ses composants, sans refaire
     # calculer_score(). Les nouveaux/modifiés sont recalculés puis mémorisés.
     memoire_globale = charger_memoire_globale()
+    RUN_LOGGER.event("MEMOIRE", "memoire_globale_chargee", items=len(memoire_globale.get("items", {})) if isinstance(memoire_globale, dict) else len(memoire_globale or []))
 
     demarrer_tache(2, f"{len(resultats_bruts)} résultats bruts")
+    RUN_LOGGER.event("ETAPE", "scoring_debut", candidats=len(resultats_bruts))
     pertinents, a_verifier, non_pertinents = traiter(resultats_bruts, memoire_globale)
+    if RUN_LOGGER is not None:
+        for c in pertinents + a_verifier + non_pertinents:
+            RUN_LOGGER.row(
+                "candidats.csv", horodatage=datetime.now().isoformat(timespec="seconds"),
+                etape="scoring", url=c.get("url", ""), titre=court(c.get("titre", "")),
+                departement=c.get("departement", ""), annee=c.get("annee_detectee", c.get("annee", "")),
+                score=c.get("score", ""), decision_python=c.get("statut", c.get("decision_python", "")),
+                decision_ia="", statut_final="", ia_analyse="NON", bdd_reutilise=c.get("bdd_reutilise", ""),
+            )
+            RUN_LOGGER.row(
+                "preuves.csv", horodatage=datetime.now().isoformat(timespec="seconds"),
+                url=c.get("url", ""), titre=court(c.get("titre", "")),
+                public_cible=c.get("public_cible", c.get("public_cible_detecte", "")),
+                type_evenement=c.get("type_evenement", ""), niveau_preuve=c.get("niveau_preuve", ""),
+                preuve_cible=c.get("preuve_cible", ""), preuve_evenement=c.get("preuve_evenement", ""),
+                preuve_date=c.get("preuve_date", ""), preuve_localisation=c.get("preuve_localisation", ""),
+                qualite_source=c.get("qualite_source", ""), contradiction=c.get("contradiction_cible", ""),
+            )
+    RUN_LOGGER.event("ETAPE", "scoring_fin", pertinents=len(pertinents), a_verifier=len(a_verifier), non_pertinents=len(non_pertinents))
     terminer_tache(2, details=f"{len(pertinents)+len(a_verifier)+len(non_pertinents)} résultats conservés après traitement")
 
     demarrer_tache(3)
@@ -3620,6 +3758,7 @@ def main():
     # --------------------------------------------------------
     demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
     memoire_ia = charger_memoire_ia()
+    RUN_LOGGER.event("IA", "cascade_debut", candidats=len(pertinents) + len(a_verifier))
     pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
         pertinents,
         a_verifier,
@@ -3656,6 +3795,7 @@ def main():
         print(f"🧠 Mémoire globale sauvegardée : {GLOBAL_MEMORY_FILE}")
     except Exception as e:
         print(f"⚠️ Impossible de sauvegarder la mémoire globale : {type(e).__name__} : {e}")
+    RUN_LOGGER.event("IA", "cascade_fin", resultats=len(ia_resultats))
     terminer_tache(5, details=f"{len(ia_resultats)} candidats traités")
 
     # Les candidats que l'IA déclare NON_PERTINENT restent dans
@@ -3755,6 +3895,7 @@ def main():
         terminer_tache(11, "TERMINEE", details=sorties_v10.get("raison", ""))
     sauvegarder_suivi_taches()
     duree_total = time.time() - debut_total
+    RUN_LOGGER.finish("OK" if sauvegarde_ok else "NON_VALIDE", duree_s=round(duree_total, 2), resultats=len(resultats_bruts), pertinents=len(pertinents), a_verifier=len(a_verifier), non_pertinents=len(non_pertinents))
 
     print()
     print("========================================")
