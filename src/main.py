@@ -35,7 +35,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
-from ia import (analyser_resultat_31, analyser_resultat_31_tour2, analyser_resultat_31_tour3, analyser_resultat_38)
+from ia import (analyser_resultat_31, analyser_resultat_31_tour2, analyser_resultat_31_tour3, analyser_resultat_38, preanalyser_geographie)
 from sources_externes import collecter_sources_externes
 from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
@@ -119,7 +119,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v28-3x31-plus1x38"
+IA_RULES_VERSION = "v29-3x31-plus1x38-geo-preanalyse"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -280,11 +280,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v26-3tours-pdf-unique-geo-strict"
+VERSION_PROGRAMME = "2026-11-26-v29-3tours-pdf-unique-geo-preanalyse"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-26-v26-geo-strict"
+REGLES_VERSION = "2026-11-26-v29-geo-preanalyse"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -2382,7 +2382,34 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
             candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
             non_eligibles.append(candidat)
 
-    candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
+    # ------------------------------------------------------------
+    # PRÉ-ANALYSE GÉOGRAPHIQUE IA
+    # ------------------------------------------------------------
+    # Étape locale, gratuite et conservatrice : elle inspecte le lieu de
+    # l'événement avant toute consommation Gemini. Une localisation
+    # explicitement hors 16/17/19/23/79/86/87 est pré-exclue.
+    geo_preexclus = []
+    candidats_geo_ok = []
+    for candidat in candidats:
+        geo = preanalyser_geographie(candidat)
+        candidat.update(geo)
+        candidat["ia_preanalyse"] = "OUI"
+        if geo.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+            candidat.update({
+                "ia_preexclusion_geo": "OUI",
+                "decision_ia": "NON_PERTINENT",
+                "confiance_ia": int(geo.get("geo_confiance", 0) or 0),
+                "raison_ia": geo.get("geo_motif", "Hors périmètre géographique."),
+                "motif_exclusion": "HORS_GEOGRAPHIE",
+                "ia_analyse": "NON",
+                "statut_final": "Non pertinent",
+            })
+            geo_preexclus.append(candidat)
+        else:
+            candidat["ia_preexclusion_geo"] = "NON"
+            candidats_geo_ok.append(candidat)
+
+    candidats = sorted(candidats_geo_ok, key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
     nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
     a_analyser_bdd = nouveaux_bdd + modifies_bdd
     memoire_globale = charger_memoire_globale()
@@ -2396,7 +2423,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
         a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
 
-    ia_resultats = list(reutilises_bdd) + list(memorises)
+    ia_resultats = list(geo_preexclus) + list(reutilises_bdd) + list(memorises)
     quota_bloque = False
     erreurs_consecutives = 0
     appels_31 = appels_38 = 0
@@ -2405,7 +2432,8 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     print("IA V28 — 3 TOURS 3.1 + TOP 3 EN 3.8")
     print("========================================")
     print(f"Règles : {IA_RULES_VERSION}")
-    print(f"Candidats filtrés : {len(candidats)}")
+    print(f"Candidats filtrés : {len(candidats) + len(geo_preexclus)}")
+    print(f"Pré-exclusions géographiques IA : {len(geo_preexclus)}")
     print(f"BDD : {len(reutilises_bdd)} réutilisés / {len(nouveaux_bdd)} nouveaux / {len(modifies_bdd)} modifiés")
     print(f"Mémoire IA : {len(memorises)} réutilisés")
     print(f"À analyser : {len(a_traiter)}" + (f" | MODE TEST, max {IA_TEST_MAX_CANDIDATS}" if IA_TEST_MODE else ""))
@@ -2501,6 +2529,27 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         else:
             r["escalade_38"] = "ECHEC"; r["raison_ia"] = str(r.get("raison_ia", "")) + " | 3.8 indisponible, décision 3.1 T3 conservée."
 
+    # ------------------------------------------------------------
+    # CONTRÔLE GÉOGRAPHIQUE FINAL — INVIOLABLE
+    # ------------------------------------------------------------
+    # Même si Gemini a retenu un candidat, une localisation d'événement
+    # explicitement hors périmètre reprend la main. Les mentions d'autres
+    # territoires dans le public/organisateur ne sont pas utilisées ici.
+    for r in t3_ok:
+        geo_final = preanalyser_geographie(r)
+        r.update({k: v for k, v in geo_final.items() if k.startswith("geo_")})
+        if geo_final.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+            r.update({
+                "decision_ia": "NON_PERTINENT",
+                "confiance_ia": int(geo_final.get("geo_confiance", 0) or 0),
+                "raison_ia": "Contrôle géographique final : " + geo_final.get("geo_motif", "hors périmètre"),
+                "motif_exclusion": "HORS_GEOGRAPHIE",
+                "statut_final": "Non pertinent",
+                "geo_controle_final": "BLOQUE",
+            })
+        else:
+            r["geo_controle_final"] = "OK"
+
     ia_resultats.extend(t3_ok)
     ia_resultats.extend(non_eligibles)
     for r in ia_resultats:
@@ -2515,6 +2564,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     print(f"Gemini 3.8 : {appels_38}/{MAX_IA_38}")
     print(f"Top 3 sélectionné : {len(top_38)}")
     print(f"Réutilisations BDD : {len(reutilises_bdd)} | mémoire IA : {len(memorises)}")
+    print(f"Pré-exclusions géographiques : {len(geo_preexclus)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
 
     if not (IA_TEST_MODE and IA_TEST_NO_PERSIST):
