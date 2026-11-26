@@ -48,7 +48,7 @@ VILLES_HORS_CIBLE = {
     "lyon","marseille","strasbourg","mulhouse","metz","nancy","rouen","caen",
     "amiens","le mans","le havre","saint-nazaire","mont-de-marsan","pau","bayonne",
     "périgueux","perigueux","bergerac","libourne","langon","chambéry","chambery",
-    "saint-malo","colmar","alès","ales","montauban","avignon","troyes","reims",
+    "saint-malo","colmar","alès","ales","montauban","avignon","troyes","reims","rodez"
 }
 
 DEPARTEMENTS_CIBLES_NOMS = {DEPARTEMENTS_NOMS[c] for c in DEPARTEMENTS_CIBLES}
