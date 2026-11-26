@@ -2,155 +2,135 @@ name: Veille APEC
 
 on:
   workflow_dispatch:
-    inputs:
-      force_teams:
-        description: "Forcer l'envoi Teams même si un message a été envoyé il y a moins de 20 h"
-        required: false
-        default: false
-        type: boolean
-      test_teams:
-        description: "Tester directement le webhook Teams avant la veille"
-        required: false
-        default: false
-        type: boolean
-
   schedule:
-    - cron: "0 7 * * *"
+    - cron: "0 6 * * *"
 
 permissions:
   contents: write
-
-concurrency:
-  group: veille-apec-main
-  cancel-in-progress: false
 
 jobs:
   veille-apec:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout du dépôt
+      - name: Checkout du dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🐍 Installation de Python 3.12
+      - name: Installation de Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: 📦 Installation des dépendances
+      - name: Installation des dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🔐 Vérification des secrets
+      - name: Vérification des secrets
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
         run: |
-          echo "========================================"
-          echo "VÉRIFICATION DES SECRETS"
-          echo "========================================"
+          echo "=== VÉRIFICATION DES SECRETS ==="
+          if [ -n "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY : présente"; else echo "GEMINI_API_KEY : absente"; fi
+          if [ -n "$TEAMS_PRIVATE_WEBHOOK_URL" ]; then echo "TEAMS_PRIVATE_WEBHOOK_URL : présente"; else echo "TEAMS_PRIVATE_WEBHOOK_URL : absente"; fi
 
-          if [ -n "$GEMINI_API_KEY" ]; then
-            echo "✅ GEMINI_API_KEY : présente"
-          else
-            echo "⚠️ GEMINI_API_KEY : absente"
-          fi
-
-          if [ -n "$TEAMS_PRIVATE_WEBHOOK_URL" ]; then
-            echo "✅ TEAMS_PRIVATE_WEBHOOK_URL : présente"
-          else
-            echo "❌ TEAMS_PRIVATE_WEBHOOK_URL : absente"
-            exit 1
-          fi
-
-      - name: 🧪 Test direct du webhook Teams
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_teams == true }}
-        env:
-          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
-        run: |
-          python - <<'PY'
-          import os, requests, sys
-          url = os.environ["TEAMS_PRIVATE_WEBHOOK_URL"]
-          payload = {"text": "🧪 TEST WEBHOOK — Veille APEC — si tu vois ce message, le webhook Teams fonctionne."}
-          r = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
-          print("HTTP:", r.status_code)
-          print("Réponse:", r.text[:500])
-          if r.status_code >= 400:
-              sys.exit(1)
-          print("✅ Webhook Teams accepté.")
-          PY
-
-      - name: 🔎 Lancement de la veille APEC
+      - name: Lancement de la veille APEC
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
-          TEAMS_FORCE_SEND: ${{ inputs.force_teams || false }}
           PYTHONUNBUFFERED: "1"
         run: |
-          echo "========================================"
-          echo "VEILLE APEC"
-          echo "========================================"
+          echo "=== VEILLE APEC ==="
           echo "Date : $(date '+%d/%m/%Y %H:%M:%S')"
-          echo "Force Teams : ${TEAMS_FORCE_SEND}"
-          echo "========================================"
-
           python src/main.py
 
-      - name: 📊 Vérification des sorties
+      - name: Détection du rapport PDF final
+        id: rapport
         if: always()
+        shell: bash
         run: |
-          echo "========================================"
-          echo "FICHIERS PRODUITS"
-          echo "========================================"
-          echo "--- data/ ---"
-          find data -maxdepth 2 -type f | sort | tail -80 || true
-          echo "--- output/ ---"
-          find output -maxdepth 1 -type f | sort | tail -80 || true
+          echo "=== RECHERCHE DU RAPPORT PDF ==="
+          PDF="$(find output -maxdepth 1 -type f -name 'rapport_veille_*.pdf' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
 
-          echo "--- Teams diagnostic ---"
-          if [ -f "output/teams_result.json" ]; then
-            cat output/teams_result.json
+          if [ -n "$PDF" ] && [ -f "$PDF" ]; then
+            echo "PDF FINAL TROUVÉ : $PDF"
+            echo "pdf_path=$PDF" >> "$GITHUB_OUTPUT"
+            echo "pdf_found=true" >> "$GITHUB_OUTPUT"
+            echo "## Rapport PDF final" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Fichier :** \`$PDF\`" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "⚠️ output/teams_result.json absent"
+            echo "Aucun rapport PDF final trouvé dans output/"
+            echo "pdf_found=false" >> "$GITHUB_OUTPUT"
+            echo "## Rapport PDF final introuvable" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: 💾 Sauvegarde des résultats
+          echo ""
+          echo "=== CONTENU DE output/ ==="
+          find output -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
+
+      - name: Publication du rapport PDF comme artifact
+        if: always() && steps.rapport.outputs.pdf_found == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapport-veille-apec-${{ github.run_number }}
+          path: ${{ steps.rapport.outputs.pdf_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Vérification des sorties
         if: always()
         run: |
+          echo "=== DATA ==="
+          ls -lah data/ 2>/dev/null || true
+          echo "=== OUTPUT ==="
+          ls -lah output/ 2>/dev/null || true
+          echo "=== EXCEL ==="
+          if [ -f "data/Apec_Salons_Evenements.xlsx" ]; then echo "Excel présent"; else echo "Excel absent"; fi
+
+      - name: Sauvegarde des résultats
+        if: always()
+        shell: bash
+        run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add data/ output/ 2>/dev/null || true
 
           if git diff --cached --quiet; then
-                      echo "🔄 Synchronisation robuste avec origin/main..."
+            echo "Aucun changement à sauvegarder."
+          else
+            git commit -m "Mise à jour automatique veille APEC"
             git fetch origin main
-
-            # Les fichiers générés par la veille peuvent être modifiés
-            # simultanément sur GitHub. On évite le rebase, qui provoque
-            # des conflits difficiles à résoudre sur XLSX/CSV/JSON.
-            # En cas de conflit, les résultats produits par ce run sont conservés.
-            echo "🔀 Fusion de la dernière version distante..."
-            git merge --no-edit -X ours origin/main || {
-              echo "❌ Échec de la fusion automatique."
-              git status --short
-              exit 1
-            }
-
-            echo "🚀 Push vers GitHub..."
+            git merge --no-edit -X ours origin/main
             git push origin HEAD:main
-
-            echo "✅ Résultats sauvegardés dans GitHub."
+            echo "Résultats sauvegardés dans GitHub."
           fi
 
-      - name: ✅ Résumé
+      - name: Résumé final
         if: always()
+        shell: bash
         run: |
-          echo "========================================"
-          echo "WORKFLOW TERMINÉ"
-          echo "========================================"
-          echo "Statut GitHub Actions : ${{ job.status }}"
-          echo "========================================"
+          echo "=== WORKFLOW TERMINÉ ==="
+          echo "Statut : ${{ job.status }}"
+          if [ "${{ steps.rapport.outputs.pdf_found }}" = "true" ]; then
+            echo "PDF FINAL : ${{ steps.rapport.outputs.pdf_path }}"
+            echo "ARTIFACT : rapport-veille-apec-${{ github.run_number }}"
+          else
+            echo "PDF FINAL : introuvable"
+          fi
+
+          {
+            echo "## Sortie finale"
+            if [ "${{ steps.rapport.outputs.pdf_found }}" = "true" ]; then
+              echo "PDF généré : \`${{ steps.rapport.outputs.pdf_path }}\`"
+              echo ""
+              echo "Artifact : \`rapport-veille-apec-${{ github.run_number }}\`"
+            else
+              echo "PDF final introuvable."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
