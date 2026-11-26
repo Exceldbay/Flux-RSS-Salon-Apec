@@ -280,11 +280,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v25-3tours-pdf-unique"
+VERSION_PROGRAMME = "2026-11-26-v26-3tours-pdf-unique-geo-strict"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-26-v25"
+REGLES_VERSION = "2026-11-26-v26-geo-strict"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -670,6 +670,53 @@ NOMS_DEPARTEMENTS = {
     "87": "haute-vienne",
 }
 
+# ============================================================
+# GÉOGRAPHIE STRICTE — PÉRIMÈTRE ABSOLU
+# ============================================================
+# Aucun candidat ne doit pouvoir rester dans la veille si son lieu
+# d'événement est explicitement situé hors des 7 départements cibles.
+# Les départements cibles restent exclusivement : 16, 17, 19, 23, 79, 86, 87.
+DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
+
+# Noms des départements français métropolitains utilisés pour détecter
+# une localisation explicite hors périmètre, même lorsque le code postal
+# n'est pas présent.
+DEPARTEMENTS_FRANCAIS = {
+    "01": "ain", "02": "aisne", "03": "allier", "04": "alpes-de-haute-provence",
+    "05": "hautes-alpes", "06": "alpes-maritimes", "07": "ardeche", "08": "ardennes",
+    "09": "ariege", "10": "aube", "11": "aude", "12": "aveyron", "13": "bouches-du-rhone",
+    "14": "calvados", "15": "cantal", "16": "charente", "17": "charente-maritime",
+    "18": "cher", "19": "correze", "2a": "corse-du-sud", "2b": "haute-corse",
+    "21": "cote-d-or", "22": "cotes-d-armor", "23": "creuse", "24": "dordogne",
+    "25": "doubs", "26": "drome", "27": "eure", "28": "eure-et-loir", "29": "finistere",
+    "30": "gard", "31": "haute-garonne", "32": "gers", "33": "gironde", "34": "herault",
+    "35": "ille-et-vilaine", "36": "indre", "37": "indre-et-loire", "38": "isere",
+    "39": "jura", "40": "landes", "41": "loir-et-cher", "42": "loire", "43": "haute-loire",
+    "44": "loire-atlantique", "45": "loiret", "46": "lot", "47": "lot-et-garonne",
+    "48": "lozere", "49": "maine-et-loire", "50": "manche", "51": "marne", "52": "haute-marne",
+    "53": "mayenne", "54": "meurthe-et-moselle", "55": "meuse", "56": "morbihan",
+    "57": "moselle", "58": "nievre", "59": "nord", "60": "oise", "61": "orne",
+    "62": "pas-de-calais", "63": "puy-de-dome", "64": "pyrenees-atlantiques", "65": "hautes-pyrenees",
+    "66": "pyrenees-orientales", "67": "bas-rhin", "68": "haut-rhin", "69": "rhone",
+    "70": "haute-saone", "71": "saone-et-loire", "72": "sarthe", "73": "savoie",
+    "74": "haute-savoie", "75": "paris", "76": "seine-maritime", "77": "seine-et-marne",
+    "78": "yvelines", "79": "deux-sevres", "80": "somme", "81": "tarn", "82": "tarn-et-garonne",
+    "83": "var", "84": "vaucluse", "85": "vendee", "86": "vienne", "87": "haute-vienne",
+    "88": "vosges", "89": "yonne", "90": "territoire de belfort", "91": "essonne",
+    "92": "hauts-de-seine", "93": "seine-saint-denis", "94": "val-de-marne", "95": "val-d-oise",
+}
+
+DEPARTEMENTS_CIBLES_NOMS = {normaliser(v): k for k, v in NOMS_DEPARTEMENTS.items()}
+
+def _normaliser_geo_fort(texte):
+    """Normalisation plus robuste pour comparer noms de départements/villes."""
+    texte = unicodedata.normalize("NFKD", str(texte or "").lower())
+    texte = "".join(c for c in texte if not unicodedata.combining(c))
+    texte = re.sub(r"[^a-z0-9\s-]", " ", texte)
+    texte = re.sub(r"\s+", " ", texte)
+    return texte.strip()
+
+
 
 # ============================================================
 # OUTILS TEXTE
@@ -719,6 +766,88 @@ def date_publication_dt(date_publication):
     except Exception:
         trouve = re.search(r"\b(20\d{2})\b", texte)
         return datetime(int(trouve.group(1)), 1, 1) if trouve else None
+
+
+def verifier_geographie_stricte(resultat):
+    """Filtre géographique ABSOLU.
+
+    Règle : le lieu de l'événement doit appartenir aux départements
+    16/17/19/23/79/86/87. Une localisation explicitement hors périmètre
+    entraîne un rejet immédiat. Si une localisation cible est identifiable,
+    elle devient la référence. À défaut, le département de la requête est
+    conservé seulement s'il n'existe aucun indice géographique contradictoire.
+
+    Retourne (ok, motif, code_detecte).
+    """
+    code_requete = str(resultat.get("departement", "")).strip()
+    if code_requete not in DEPARTEMENTS_CIBLES:
+        return False, f"Département de recherche hors périmètre : {code_requete or 'inconnu'}", code_requete
+
+    # Pour déterminer le lieu réel, on privilégie les champs liés au lieu
+    # de l'événement. On n'utilise volontairement pas l'organisateur seul.
+    texte_lieu = _normaliser_geo_fort(" ".join(str(resultat.get(k, "")) for k in (
+        "lieu_page", "lieu", "titre_page", "titre", "description_page", "description"
+    )))
+
+    # 1) Code postal explicite dans le contexte géographique.
+    codes_postaux = re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", texte_lieu)
+    for cp in codes_postaux:
+        prefixe = cp[:2]
+        if prefixe in DEPARTEMENTS_CIBLES:
+            resultat["departement"] = prefixe
+            resultat["nom_departement"] = NOMS_DEPARTEMENTS[prefixe]
+            resultat["geographie_corrigee"] = "OUI"
+            resultat["geographie_stricte"] = "OUI"
+            return True, f"Code postal cible détecté : {cp}", prefixe
+        # Un code postal hors cible est une preuve forte d'exclusion.
+        resultat["geographie_stricte"] = "NON"
+        return False, f"Code postal hors périmètre : {cp}", prefixe
+
+    # 2) Nom explicite d'un département.
+    departements_trouves = []
+    for code, nom in DEPARTEMENTS_FRANCAIS.items():
+        nom_norm = _normaliser_geo_fort(nom)
+        if nom_norm and re.search(r"(?<![a-z])" + re.escape(nom_norm) + r"(?![a-z])", texte_lieu):
+            departements_trouves.append(code)
+
+    departements_trouves = sorted(set(departements_trouves))
+    if departements_trouves:
+        cibles = [c for c in departements_trouves if c in DEPARTEMENTS_CIBLES]
+        hors = [c for c in departements_trouves if c not in DEPARTEMENTS_CIBLES]
+        if hors and not cibles:
+            resultat["geographie_stricte"] = "NON"
+            noms = ", ".join(DEPARTEMENTS_FRANCAIS[c] for c in hors[:3])
+            return False, f"Département explicitement hors périmètre : {noms}", hors[0]
+        if cibles:
+            code = cibles[0]
+            resultat["departement"] = code
+            resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
+            resultat["geographie_corrigee"] = "OUI"
+            resultat["geographie_stricte"] = "OUI"
+            return True, f"Département cible explicitement détecté : {code}", code
+
+    # 3) Ville cible connue.
+    codes_villes = []
+    for code, villes in VILLES_DEPARTEMENTS.items():
+        for ville in villes:
+            ville_norm = _normaliser_geo_fort(ville)
+            if ville_norm and re.search(r"(?<![a-z])" + re.escape(ville_norm) + r"(?![a-z])", texte_lieu):
+                codes_villes.append(code)
+                break
+    codes_villes = sorted(set(codes_villes))
+    if len(codes_villes) == 1:
+        code = codes_villes[0]
+        resultat["departement"] = code
+        resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
+        resultat["geographie_corrigee"] = "OUI"
+        resultat["geographie_stricte"] = "OUI"
+        return True, f"Ville cible détectée dans le département {code}", code
+
+    # 4) Aucun indice contradictoire : on conserve le département porté par
+    # la requête, mais on marque que la preuve géographique reste indirecte.
+    # Il pourra être renforcé par l'enrichissement de page.
+    resultat["geographie_stricte"] = "INDIRECTE"
+    return True, f"Département de requête cible : {code_requete}, aucune contradiction géographique détectée", code_requete
 
 
 def detecter_geographie(resultat):
@@ -1245,7 +1374,7 @@ def sauvegarder_memoire_globale(resultats, ancienne_memoire=None):
         "signaux_entreprise", "signaux_exclusion", "details_score",
         "statut", "raison", "motif", "hors_periode", "periode",
         "evenement_detecte", "preuve_evenement", "geographie_verifiee",
-        "hors_perimetre", "hors_geographie", "annee_detectee",
+        "hors_perimetre", "hors_geographie", "geographie_stricte", "geographie_stricte_motif", "erreur_geographique", "annee_detectee",
         "priorite_2027", "niveau_source_v9",
         "statut_final", "decision_ia", "confiance_ia", "raison_ia",
         "page_enrichie", "date_evenement_page", "lieu_page", "organisateur_page",
@@ -2076,6 +2205,29 @@ def traiter(resultats, memoire_globale=None):
 
     for resultat in resultats:
         corriger_departement_par_ville(resultat)
+
+        # FILTRE GÉOGRAPHIQUE ABSOLU : aucun événement explicitement hors
+        # des 16/17/19/23/79/86/87 ne doit atteindre le scoring ou Gemini.
+        geo_stricte_ok, geo_motif, geo_code = verifier_geographie_stricte(resultat)
+        if not geo_stricte_ok:
+            resultat["hors_perimetre"] = "OUI"
+            resultat["hors_geographie"] = geo_motif
+            resultat["erreur_geographique"] = "ERREUR_GEOGRAPHIQUE"
+            resultat["score"] = -999
+            resultat["score_geographie"] = -999
+            resultat["statut"] = "Non pertinent"
+            resultat["statut_final"] = "Non pertinent"
+            resultat["decision_ia"] = "IA_NON_REQUISE"
+            resultat["raison_ia"] = "Exclusion géographique absolue : " + geo_motif
+            non_pertinents.append(resultat)
+            ecartes_hors_periode += 0
+            continue
+
+        resultat["geographie_stricte_motif"] = geo_motif
+        resultat["departement"] = str(resultat.get("departement") or geo_code)
+        resultat["nom_departement"] = NOMS_DEPARTEMENTS.get(
+            resultat["departement"], resultat.get("nom_departement", "")
+        )
 
         cle = _cle_memoire_globale(resultat)
         item = memoire_globale.get(cle) if cle else None
