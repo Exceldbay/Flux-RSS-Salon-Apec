@@ -12,7 +12,6 @@ import difflib
 import subprocess
 import sys
 import os
-import unicodedata
 from html import unescape
 
 # ============================================================
@@ -20,6 +19,7 @@ from html import unescape
 # ============================================================
 try:
     from reportlab.lib import colors
+    from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -281,7 +281,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v29-3tours-pdf-unique-geo-preanalyse"
+VERSION_PROGRAMME = "2026-11-26-v31-3tours-pdf-wrap-no-negative-score"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -606,26 +606,15 @@ EVENEMENTS_HORS_PERIMETRE = [
 # Villes / territoires explicitement identifiés comme hors périmètre
 # lors de l'audit des 264 résultats potentiellement utiles.
 VILLES_HORS_CIBLE = [
-    "tours",
-    "nice",
-    "agen",
-    "mulhouse",
-    "bordeaux",
-    "saint-nazaire",
-    "la réunion",
-    "montpellier",
-    "lille",
-    "chambéry",
-    "saint-malo",
-    "langon",
-    "colmar",
-    "condrieu",
-    "alès",
-    "ales",
-    "paris",
-    "pyrénées-atlantiques",
-    "gironde",
-    "alsace",
+    # Villes hors des 7 départements cibles : uniquement des lieux potentiels.
+    "nantes", "saint-nazaire", "angers", "tours", "bordeaux", "agen",
+    "nice", "mulhouse", "montpellier", "lille", "chambéry", "saint-malo",
+    "langon", "colmar", "condrieu", "alès", "ales", "paris", "toulouse",
+    "rennes", "orléans", "orleans", "clermont-ferrand", "dijon", "grenoble",
+    "lyon", "marseille", "strasbourg", "metz", "nancy", "rouen", "caen",
+    "amiens", "le mans", "le havre", "mont-de-marsan", "pau", "bayonne",
+    "périgueux", "perigueux", "bergerac", "libourne", "montauban", "avignon",
+    "troyes", "reims", "pyrénées-atlantiques", "gironde", "alsace",
 ]
 
 VILLES_DEPARTEMENTS = {
@@ -1989,7 +1978,8 @@ def calculer_score(resultat):
             score += 2
             raisons.append("lieu détecté")
     else:
-        score -= 18
+        # Le score représente uniquement des preuves positives.
+        # Une absence de preuve ne produit jamais de score négatif.
         raisons.append("page sans événement suffisamment démontré")
 
     # Cible Apec.
@@ -2025,7 +2015,7 @@ def calculer_score(resultat):
         score += 2
         raisons.append("source secondaire")
     else:
-        score -= 2
+        # Pas de malus : une source faible n'ajoute simplement aucun point.
         raisons.append("source faible/non qualifiée")
 
     # Catégorie de recherche : bonus faible.
@@ -2039,20 +2029,21 @@ def calculer_score(resultat):
         score += 5
         raisons.append("géographie cible vérifiée")
     else:
-        score -= 12
+        # La géographie est traitée comme une condition de décision, pas comme
+        # une pénalité. Aucun score négatif ne peut être généré.
         raisons.append("géographie cible non démontrée")
     if hors_geo:
-        score -= 25
         raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
 
     # Exclusions fortes.
     if exclusions:
-        malus = min(35, 12 * len(exclusions))
-        score -= malus
+        # Les exclusions fortes font basculer le statut, mais ne créent pas
+        # de score négatif. Le score reste lisible comme un niveau de preuve.
         raisons.append("hors cible probable: " + ", ".join(exclusions[:5]))
 
     if editorial and not (direct or entreprise or superieur):
-        score -= 20
+        # Un contenu éditorial n'est pas récompensé, mais n'est pas pénalisé
+        # artificiellement non plus. Le statut final gère l'exclusion.
         raisons.append("contenu éditorial/actualité")
 
     # Année recherchée.
@@ -2074,7 +2065,6 @@ def calculer_score(resultat):
     # trouvée dans le texte.
     evenement_passe = bool(date_evenement and date_evenement.date() < datetime.now().date())
     if evenement_passe:
-        score -= MALUS_HORS_PERIODE
         raisons.append(f"événement passé : {date_evenement:%d/%m/%Y}")
 
     # Anciennes éditions dans une page sans année actuelle/future.
@@ -2089,7 +2079,6 @@ def calculer_score(resultat):
         )
     )
     if hors_periode:
-        score -= MALUS_HORS_PERIODE
         origine = ", ".join(annees_passees[:3]) if annees_passees else f"publication {date_pub:%d/%m/%Y}"
         raisons.append(f"hors période : {origine}")
 
@@ -2135,6 +2124,9 @@ def calculer_score(resultat):
         statut = "À vérifier"
         raisons.append("format indirect : vérification nécessaire")
 
+    # Invariant V31 : un score affiché ou enregistré ne peut jamais être négatif.
+    score = max(0, int(score or 0))
+
     raison = {
         "Pertinent": "Cible Apec + événement + période suffisamment démontrés",
         "À vérifier": "Signal utile mais preuve ou ciblage à confirmer",
@@ -2150,9 +2142,9 @@ def calculer_score(resultat):
         "score_apec": min(24, 8 * len(direct)),
         "score_entreprise": min(16, 4 * len(entreprise)),
         "score_qualifie": min(16, 4 * len(qualifie)),
-        "score_geographie": 5 if geo_ok else -12,
+        "score_geographie": 5 if geo_ok else 0,
         "score_date": 4 if date_evenement else 0,
-        "score_bruit": -20 if editorial else 0,
+        "score_bruit": 0,
         "score_complementaire": 0,
         "bonus_titre": 4 if event_dans_titre else 0,
         "signaux_cible_apec": ", ".join(direct),
@@ -2214,8 +2206,8 @@ def traiter(resultats, memoire_globale=None):
             resultat["hors_perimetre"] = "OUI"
             resultat["hors_geographie"] = geo_motif
             resultat["erreur_geographique"] = "ERREUR_GEOGRAPHIQUE"
-            resultat["score"] = -999
-            resultat["score_geographie"] = -999
+            resultat["score"] = 0
+            resultat["score_geographie"] = 0
             resultat["statut"] = "Non pertinent"
             resultat["statut_final"] = "Non pertinent"
             resultat["decision_ia"] = "IA_NON_REQUISE"
@@ -2251,6 +2243,17 @@ def traiter(resultats, memoire_globale=None):
                         valeur = champs_mem.get(champ)
                         if valeur not in ("", None):
                             resultat[champ] = valeur
+                    # Compatibilité avec les anciennes mémoires : aucun score
+                    # négatif ne doit ressortir d'un cache historique.
+                    try:
+                        resultat["score"] = max(0, int(float(resultat.get("score", 0) or 0)))
+                    except Exception:
+                        resultat["score"] = 0
+                    try:
+                        resultat["score_geographie"] = max(0, int(float(resultat.get("score_geographie", 0) or 0)))
+                    except Exception:
+                        resultat["score_geographie"] = 0
+                    resultat["score_bruit"] = max(0, int(float(resultat.get("score_bruit", 0) or 0)))
                     resultat["memoire_scoring"] = "OUI"
                     reutiliser_score = True
                     scores_reutilises += 1
@@ -2365,7 +2368,8 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     candidats, non_eligibles, hors_perimetre = [], [], []
 
     for candidat in tous_candidats:
-        score = int(candidat.get("score", 0) or 0)
+        score = max(0, int(candidat.get("score", 0) or 0))
+        candidat["score"] = score
         dept = str(candidat.get("departement", "")).strip()
         erreur_geo = str(candidat.get("erreur_geographique", "")).strip()
         if dept and dept not in DEPARTEMENTS_CIBLES:
@@ -2374,9 +2378,6 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         if erreur_geo == "ERREUR_GEOGRAPHIQUE":
             candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":"Hors périmètre géographique : exclu avant analyse IA.","ia_analyse":"NON","statut_final":"Non pertinent"})
             hors_perimetre.append(candidat); continue
-        if score < 0:
-            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Score négatif : {score}. Exclu du filtrage IA.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
-            non_eligibles.append(candidat); continue
         if score >= GEMINI_SCORE_MIN:
             candidats.append(candidat)
         else:
@@ -2430,7 +2431,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     appels_31 = appels_38 = 0
 
     print("\n========================================")
-    print("IA V28 — 3 TOURS 3.1 + TOP 3 EN 3.8")
+    print("IA V31 — 3 TOURS 3.1 + TOP 3 EN 3.8")
     print("========================================")
     print(f"Règles : {IA_RULES_VERSION}")
     print(f"Candidats filtrés : {len(candidats) + len(geo_preexclus)}")
@@ -3551,50 +3552,86 @@ def generer_rapport_pdf_unique(
         Paragraph("1. Synthèse", styles["RapportSection"]),
     ]
 
+    # Styles dédiés aux cellules : Paragraph force le retour à la ligne
+    # et empêche tout débordement horizontal. splitLongWords permet aussi
+    # de couper les chaînes longues sans espaces.
+    styles.add(ParagraphStyle(
+        name="RapportCell", parent=styles["Normal"],
+        fontSize=7.2, leading=8.6, wordWrap="CJK", splitLongWords=True,
+        spaceAfter=0, spaceBefore=0
+    ))
+    styles.add(ParagraphStyle(
+        name="RapportCellSmall", parent=styles["Normal"],
+        fontSize=8.2, leading=9.8, wordWrap="CJK", splitLongWords=True,
+        spaceAfter=0, spaceBefore=0
+    ))
+    styles.add(ParagraphStyle(
+        name="RapportCellHead", parent=styles["Normal"],
+        fontSize=7.2, leading=8.5, fontName="Helvetica-Bold",
+        wordWrap="CJK", splitLongWords=True, spaceAfter=0, spaceBefore=0
+    ))
+
+    def cell(value, style="RapportCell"):
+        txt = "" if value is None else str(value)
+        txt = xml_escape(txt).replace("\n", "<br/>")
+        return Paragraph(txt or "—", styles[style])
+
+    def header_row(values):
+        return [cell(v, "RapportCellHead") for v in values]
+
     resume = [
-        ["Indicateur", "Résultat"],
-        ["Candidats collectés", str(nb(resultats_bruts))],
-        ["Sources externes", str(nb(externes))],
-        ["Pertinents", str(nb(pertinents))],
-        ["À vérifier", str(nb(a_verifier))],
-        ["Non pertinents", str(nb(non_pertinents))],
-        ["Résultats IA", str(nb(ia_resultats))],
-        ["Appels Gemini 3.1", str(appels_31)],
-        ["Appels Gemini 3.8", str(appels_38)],
-        ["Erreurs", str(erreurs_nb)],
-        ["Durée totale", f"{float(duree_total):.1f} s"],
-        ["Sauvegarde", "OUI" if sauvegarde_ok else "NON"],
-        ["Synchronisation Excel", "OUI" if synchronisation_ok else "NON"],
+        header_row(["Indicateur", "Résultat"]),
+        [cell("Candidats collectés"), cell(nb(resultats_bruts))],
+        [cell("Sources externes"), cell(nb(externes))],
+        [cell("Pertinents"), cell(nb(pertinents))],
+        [cell("À vérifier"), cell(nb(a_verifier))],
+        [cell("Non pertinents"), cell(nb(non_pertinents))],
+        [cell("Résultats IA"), cell(nb(ia_resultats))],
+        [cell("Appels Gemini 3.1"), cell(appels_31)],
+        [cell("Appels Gemini 3.8"), cell(appels_38)],
+        [cell("Erreurs"), cell(erreurs_nb)],
+        [cell("Durée totale"), cell(f"{float(duree_total):.1f} s")],
+        [cell("Sauvegarde"), cell("OUI" if sauvegarde_ok else "NON")],
+        [cell("Synchronisation Excel"), cell("OUI" if synchronisation_ok else "NON")],
     ]
-    t = Table(resume, colWidths=[75*mm, 100*mm], repeatRows=1)
+    t = Table(resume, colWidths=[75*mm, 100*mm], repeatRows=1, splitByRow=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 8.5),
         ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4),
+        ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
     story.append(t)
 
     story.append(Paragraph("2. Résultats prioritaires", styles["RapportSection"]))
-    lignes = [["Candidat", "Statut", "Score", "Raison / preuve"]]
+    lignes = [header_row(["Candidat", "Statut", "Score", "Raison / preuve"])]
     tous = list(pertinents or []) + list(a_verifier or [])
     for c in tous[:50]:
+        # Aucun score négatif ne doit être affiché dans le PDF.
+        try:
+            score_affiche = max(0, int(float(c.get("score", 0) or 0)))
+        except Exception:
+            score_affiche = 0
         lignes.append([
-            valeur(c, "titre", valeur(c, "title", "Sans titre"))[:70],
-            valeur(c, "statut"),
-            valeur(c, "score"),
-            valeur(c, "raison", valeur(c, "motif", ""))[:100],
+            cell(valeur(c, "titre", valeur(c, "title", "Sans titre"))),
+            cell(valeur(c, "statut")),
+            cell(score_affiche),
+            cell(valeur(c, "raison", valeur(c, "motif", ""))),
         ])
     if len(lignes) == 1:
-        lignes.append(["Aucun candidat", "—", "—", "Aucun résultat prioritaire"])
-    t = Table(lignes, colWidths=[55*mm, 30*mm, 18*mm, 72*mm], repeatRows=1)
+        lignes.append([cell("Aucun candidat"), cell("—"), cell("—"), cell("Aucun résultat prioritaire")])
+    t = Table(lignes, colWidths=[55*mm, 30*mm, 18*mm, 72*mm], repeatRows=1, splitByRow=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 7.5),
         ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 3),
+        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
     story.append(t)
 
@@ -3606,24 +3643,26 @@ def generer_rapport_pdf_unique(
         styles["RapportSmall"]
     ))
 
-    ia_lignes = [["Candidat", "Décision", "Confiance", "Analyse / action"]]
+    ia_lignes = [header_row(["Candidat", "Décision", "Confiance", "Analyse / action"])]
     for c in list(ia_resultats or [])[:50]:
-        analyse = valeur(c, "analyse_humaine", valeur(c, "raison", ""))[:140]
+        analyse = valeur(c, "analyse_humaine", valeur(c, "raison", ""))
         ia_lignes.append([
-            valeur(c, "titre", valeur(c, "title", "Sans titre"))[:55],
-            valeur(c, "statut", valeur(c, "decision", "—")),
-            valeur(c, "confiance", valeur(c, "confiance_31", "—")),
-            analyse,
+            cell(valeur(c, "titre", valeur(c, "title", "Sans titre"))),
+            cell(valeur(c, "statut", valeur(c, "decision", "—"))),
+            cell(valeur(c, "confiance", valeur(c, "confiance_31", "—"))),
+            cell(analyse),
         ])
     if len(ia_lignes) == 1:
-        ia_lignes.append(["Aucun résultat IA", "—", "—", "—"])
-    t = Table(ia_lignes, colWidths=[50*mm, 32*mm, 23*mm, 70*mm], repeatRows=1)
+        ia_lignes.append([cell("Aucun résultat IA"), cell("—"), cell("—"), cell("—")])
+    t = Table(ia_lignes, colWidths=[50*mm, 32*mm, 23*mm, 70*mm], repeatRows=1, splitByRow=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
         ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
-        ("FONTSIZE", (0,0), (-1,-1), 7.5),
         ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 3),
+        ("RIGHTPADDING", (0,0), (-1,-1), 3),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
     ]))
     story.append(t)
 
