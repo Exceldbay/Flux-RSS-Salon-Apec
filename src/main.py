@@ -12,6 +12,7 @@ import difflib
 import subprocess
 import sys
 import os
+import unicodedata
 from html import unescape
 
 # ============================================================
