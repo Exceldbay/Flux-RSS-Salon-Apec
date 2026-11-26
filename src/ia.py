@@ -42,13 +42,16 @@ DEPARTEMENTS_NOMS = {
 # est présent sans département/code postal. Cette liste ne sert jamais à
 # exclure une ville mentionnée uniquement comme origine du public.
 VILLES_HORS_CIBLE = {
-    "bordeaux","tours","paris","nice","agen",
-    "nantes","angers","toulouse","montpellier","lille","rennes","nîmes","nimes",
-    "orléans","orleans","clermont-ferrand","clermont ferrand","dijon","grenoble",
-    "lyon","marseille","strasbourg","mulhouse","metz","nancy","rouen","caen",
-    "amiens","le mans","le havre","saint-nazaire","mont-de-marsan","pau","bayonne",
-    "périgueux","perigueux","bergerac","libourne","langon","chambéry","chambery",
-    "saint-malo","colmar","alès","ales","montauban","avignon","troyes","reims","rodez"
+    # Uniquement des villes hors périmètre. Les villes cibles (Limoges,
+    # Poitiers, La Rochelle, Niort, etc.) ne doivent JAMAIS figurer ici.
+    "nantes", "saint-nazaire", "angers", "tours", "bordeaux", "agen",
+    "nice", "paris", "toulouse", "montpellier", "lille", "rennes",
+    "orléans", "orleans", "clermont-ferrand", "clermont ferrand", "dijon",
+    "grenoble", "lyon", "marseille", "strasbourg", "mulhouse", "metz",
+    "nancy", "rouen", "caen", "amiens", "le mans", "le havre",
+    "saint-malo", "périgueux", "perigueux", "bergerac", "libourne",
+    "mont-de-marsan", "pau", "bayonne", "langon", "colmar", "alès", "ales",
+    "montauban", "avignon", "troyes", "reims",
 }
 
 DEPARTEMENTS_CIBLES_NOMS = {DEPARTEMENTS_NOMS[c] for c in DEPARTEMENTS_CIBLES}
@@ -63,37 +66,32 @@ def _contient_mot(texte, mot):
     return bool(re.search(r"(?<![a-z0-9])" + re.escape(mot) + r"(?![a-z0-9])", texte))
 
 def preanalyser_geographie(resultat):
-    """Pré-analyse géographique avant Gemini.
+    """Pré-analyse géographique stricte avant Gemini.
 
-    Priorité aux champs qui décrivent le LIEU DE L'ÉVÉNEMENT. Une mention
-    d'une autre ville dans le public, l'organisateur ou le contenu général
-    ne suffit pas à exclure l'événement.
-
-    Retourne un dictionnaire avec décision, zones détectées et niveau de
-    confiance. Décision : GEO_CIBLE_CONFIRMEE / GEO_HORS_CIBLE /
-    GEO_AMBIGUE / GEO_INCONNUE.
+    Règle fondamentale : on cherche le LIEU DE L'ÉVÉNEMENT, pas toutes les
+    villes citées dans le contenu. Une ville hors périmètre n'entraîne donc
+    un rejet que lorsqu'elle est utilisée comme localisation explicite de
+    l'événement (ex. « Campus Nantes », « à Nantes », « Nantes - ... »,
+    code postal 44000). Une mention du type « entreprises de Nantes recrutent
+    à Poitiers » ne rejette pas un événement à Poitiers.
     """
     champs_lieu = [
         resultat.get("lieu_page", ""),
         resultat.get("lieu", ""),
         resultat.get("adresse_page", ""),
     ]
-    champs_evenement = [
-        resultat.get("titre_page", ""),
-        resultat.get("titre", ""),
-        resultat.get("description_page", ""),
-        resultat.get("description", ""),
-    ]
+    champs_titre = [resultat.get("titre_page", ""), resultat.get("titre", "")]
+    champs_desc = [resultat.get("description_page", ""), resultat.get("description", "")]
+    contenu = str(resultat.get("contenu_page", "") or "")[:16000]
+
     lieu = _geo_norm(" ".join(str(x or "") for x in champs_lieu))
-    evenement = _geo_norm(" ".join(str(x or "") for x in champs_evenement))
-    texte_cible = lieu if lieu else evenement
+    titre = _geo_norm(" ".join(str(x or "") for x in champs_titre))
+    desc = _geo_norm(" ".join(str(x or "") for x in champs_desc))
+    evenement = f"{titre} {desc}"
 
-    zones = []
-    codes = []
-    villes = []
-    hors = []
+    zones, codes, villes, hors = [], [], [], []
 
-    # 1. Code postal dans un champ de lieu : preuve très forte.
+    # 1) Code postal : priorité absolue quand présent dans un champ de lieu.
     for cp in re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", lieu):
         code = cp[:2]
         codes.append(code)
@@ -102,37 +100,77 @@ def preanalyser_geographie(resultat):
         else:
             hors.append(f"{cp} ({DEPARTEMENTS_NOMS.get(code, code)})")
 
-    # 2. Nom de département dans le lieu.
+    # 2) Département explicite dans un champ de lieu.
     for code, nom in DEPARTEMENTS_NOMS.items():
         nom_n = _geo_norm(nom)
-        if nom_n and _contient_mot(texte_cible, nom_n):
+        if nom_n and _contient_mot(lieu, nom_n):
             codes.append(code)
-            zones.append(f"{nom} ({code})") if code in DEPARTEMENTS_CIBLES else hors.append(f"{nom} ({code})")
+            if code in DEPARTEMENTS_CIBLES:
+                zones.append(f"{nom} ({code})")
+            else:
+                hors.append(f"{nom} ({code})")
 
-    # 3. Ville hors cible uniquement lorsqu'elle est utilisée comme lieu.
+    # 3) Ville hors cible dans le champ lieu : preuve directe.
     for ville in VILLES_HORS_CIBLE:
-        if _contient_mot(texte_cible, _geo_norm(ville)):
+        vn = _geo_norm(ville)
+        if vn and _contient_mot(lieu, vn):
             villes.append(ville)
             hors.append(ville)
 
-    # 4. Indices de lieu dans le titre/texte : « à Bordeaux », « Bordeaux - »,
-    # « Bordeaux, 33000 », etc. On reste volontairement prudent.
+    # 4) Titre : les formulations de localisation explicite sont fortes.
+    #    « Campus Nantes » est volontairement reconnu comme lieu.
+    patterns_forts = [
+        r"(?:\ba\s+|\bà\s+|\bcampus\s+){}(?:\s|[,|/\-]|$)",
+        r"(?:^|[-–|/]\s*){}(?:\s*[,|/\-]|\s+\d{{5}}|$)",
+        r"(?:^|\s){}\s*\(\s*\d{{2}}\s*\)",
+    ]
     for ville in VILLES_HORS_CIBLE:
         vn = _geo_norm(ville)
-        if re.search(r"(?:\ba\s+|\bà\s+|[-–|/]\s*|,\s*)" + re.escape(vn) + r"(?:\s*[,|/-]|\s+\d{5}|$)", evenement):
-            if ville not in hors:
-                hors.append(ville)
-            if ville not in villes:
+        if not vn:
+            continue
+        for pat in patterns_forts:
+            if re.search(pat.format(re.escape(vn)), titre, flags=re.I):
                 villes.append(ville)
+                hors.append(ville)
+                break
 
-    # Nettoyage des doublons.
+    # 5) Description : seulement les formulations qui attribuent clairement
+    #    une localisation à l'événement, jamais une simple mention contextuelle.
+    for ville in VILLES_HORS_CIBLE:
+        vn = _geo_norm(ville)
+        if not vn:
+            continue
+        desc_patterns = [
+            rf"\b(?:a|à)\s+{re.escape(vn)}(?:\s|,|\.|$)",
+            rf"\b(?:lieu|adresse|site|campus)\s*[:\-]\s*[^.\n]*\b{re.escape(vn)}\b",
+            rf"\b{re.escape(vn)}\s*\(\s*\d{{2}}\s*\)",
+            rf"\b{re.escape(vn)}\s+\d{{5}}\b",
+        ]
+        if any(re.search(p, desc, flags=re.I) for p in desc_patterns):
+            villes.append(ville)
+            hors.append(ville)
+
+    # 6) Contenu de page : uniquement des marqueurs de localisation forts.
+    #    On évite de considérer toute occurrence de « Nantes » comme un lieu.
+    for ville in VILLES_HORS_CIBLE:
+        vn = _geo_norm(ville)
+        if not vn:
+            continue
+        content_patterns = [
+            rf"\b(?:lieu|adresse|site|campus)\s*[:\-]\s*[^\n]{{0,180}}\b{re.escape(vn)}\b",
+            rf"\b(?:a|à)\s+{re.escape(vn)}\b[^\n]{{0,80}}\b(?:2026|2027|2028|portes ouvertes|forum|job dating|salon)\b",
+        ]
+        if any(re.search(p, contenu, flags=re.I) for p in content_patterns):
+            villes.append(ville)
+            hors.append(ville)
+
     codes = sorted(set(codes))
     zones = list(dict.fromkeys(zones))
     villes = list(dict.fromkeys(villes))
     hors = list(dict.fromkeys(hors))
 
-    # Une preuve hors cible dans le champ lieu prime immédiatement.
-    if hors and (lieu or any(re.search(r"(?:\ba\s+|\bà\s+|[-–|/]\s*|,\s*)" + re.escape(_geo_norm(v)) + r"(?:\s*[,|/-]|\s+\d{5}|$)", evenement) for v in villes)):
+    # Une preuve directe hors cible prime.
+    if hors:
         return {
             "geo_preanalyse": "GEO_HORS_CIBLE",
             "geo_confiance": 100,
@@ -150,7 +188,7 @@ def preanalyser_geographie(resultat):
             "geo_zones_detectees": "; ".join(zones),
             "geo_departements_detectes": "; ".join(codes),
             "geo_villes_detectees": "; ".join(villes),
-            "geo_hors_cible": "; ".join(hors),
+            "geo_hors_cible": "",
             "geo_motif": "Lieu explicitement rattaché à un département cible.",
         }
 
@@ -162,7 +200,7 @@ def preanalyser_geographie(resultat):
             "geo_zones_detectees": "; ".join(zones),
             "geo_departements_detectes": "; ".join(codes),
             "geo_villes_detectees": "; ".join(villes),
-            "geo_hors_cible": "; ".join(hors),
+            "geo_hors_cible": "",
             "geo_motif": f"Le département de recherche est cible ({dept_requete}) mais le lieu précis n'est pas confirmé.",
         }
 
@@ -172,7 +210,7 @@ def preanalyser_geographie(resultat):
         "geo_zones_detectees": "; ".join(zones),
         "geo_departements_detectes": "; ".join(codes),
         "geo_villes_detectees": "; ".join(villes),
-        "geo_hors_cible": "; ".join(hors),
+        "geo_hors_cible": "",
         "geo_motif": "Aucun lieu exploitable identifié.",
     }
 
