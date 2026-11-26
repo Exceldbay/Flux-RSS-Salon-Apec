@@ -21,7 +21,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
-from ia import analyser_resultat_31, analyser_resultat_38
+from ia import (analyser_resultat_31, analyser_resultat_31_tour2, analyser_resultat_31_tour3, analyser_resultat_38)
 from sources_externes import collecter_sources_externes
 from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
@@ -79,7 +79,7 @@ CONFIG = ROOT / "config"
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 IA_MEMORY_FILE = DATA / "ia_memoire.json"
-IA_MEMORY_VERSION = "v26-preuve"
+IA_MEMORY_VERSION = "v2-global"
 GLOBAL_MEMORY_FILE = DATA / "memoire_veille_globale.json"
 MEMORY_REFRESH_DAYS = int(os.getenv("MEMORY_REFRESH_DAYS", "7"))
 # BDD persistante des candidats déjà analysés
@@ -92,67 +92,6 @@ HISTORIQUE_RUNS_DIR = OUTPUT
 HISTORIQUE_MAX_FICHIERS = int(os.getenv("HISTORIQUE_MAX_FICHIERS", "100"))
 HISTORIQUE_MAX_LIGNES_PAR_FICHIER = int(os.getenv("HISTORIQUE_MAX_LIGNES_PAR_FICHIER", "5000"))
 
-# Nettoyage de output : on conserve les 7 derniers lots de journaux
-# (CSV + DOCX + PDF) pour garder une trace exploitable sans faire grossir
-# inutilement le dépôt Git. Les fichiers Teams temporaires sont supprimés.
-OUTPUT_KEEP_JOURNAL_RUNS = int(os.getenv("OUTPUT_KEEP_JOURNAL_RUNS", "7"))
-OUTPUT_KEEP_LOG_RUNS = int(os.getenv("OUTPUT_KEEP_LOG_RUNS", "30"))
-OUTPUT_TRANSIENT_FILES = {"teams_payload.json", "teams_result.json"}
-
-def nettoyer_output():
-    """Nettoie uniquement les sorties générées et temporaires connues.
-
-    Les 7 derniers horodatages de journal sont conservés. Les autres fichiers
-    présents dans output/ ne sont jamais supprimés automatiquement.
-    """
-    try:
-        OUTPUT.mkdir(exist_ok=True)
-        groupes = {}
-        for f in OUTPUT.glob("journal_recherche_*"):
-            if not f.is_file():
-                continue
-            m = re.match(r"journal_recherche_(\d{8}_\d{6})\.(csv|docx|pdf)$", f.name)
-            if m:
-                groupes.setdefault(m.group(1), set()).add(f)
-        horodatages = sorted(groupes.keys(), reverse=True)
-        a_conserver = set(horodatages[:max(0, OUTPUT_KEEP_JOURNAL_RUNS)])
-        supprimes = 0
-        for ts, fichiers in groupes.items():
-            if ts not in a_conserver:
-                for f in fichiers:
-                    try:
-                        f.unlink()
-                        supprimes += 1
-                    except OSError as exc:
-                        print(f"⚠️ Impossible de supprimer {f.name}: {exc}")
-        for nom in OUTPUT_TRANSIENT_FILES:
-            f = OUTPUT / nom
-            if f.exists():
-                try:
-                    f.unlink()
-                    supprimes += 1
-                except OSError as exc:
-                    print(f"⚠️ Impossible de supprimer {f.name}: {exc}")
-
-        # Conservation séparée des logs d'exécution : 30 runs complets par défaut.
-        logs_dir = OUTPUT / "logs"
-        if logs_dir.exists():
-            dossiers = sorted(
-                [d for d in logs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
-                key=lambda d: d.name, reverse=True,
-            )
-            for ancien in dossiers[max(0, OUTPUT_KEEP_LOG_RUNS):]:
-                try:
-                    import shutil
-                    shutil.rmtree(ancien)
-                    supprimes += 1
-                except OSError as exc:
-                    print(f"⚠️ Impossible de supprimer le log {ancien.name}: {exc}")
-        print(f"🧹 Nettoyage output : {supprimes} élément(s) supprimé(s), {len(a_conserver)} lot(s) de journaux et {OUTPUT_KEEP_LOG_RUNS} runs de logs conservés.")
-    except Exception as exc:
-        print(f"⚠️ Nettoyage output ignoré : {type(exc).__name__}: {exc}")
-
-
 
 SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
 SUIVI_TACHES_CSV = DATA / "suivi_taches.csv"
@@ -162,7 +101,11 @@ TIMEOUT = 10
 MAX_RETRIES = 2
 COOLDOWN_31_SECONDS = int(os.getenv("GEMINI_31_COOLDOWN_SECONDS", "10"))
 COOLDOWN_38_SECONDS = int(os.getenv("GEMINI_38_COOLDOWN_SECONDS", "60"))
-MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "5"))
+MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
+IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
+IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
+IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
+IA_RULES_VERSION = "v28-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -194,67 +137,6 @@ thread_local = threading.local()
 JOURNAL_RECHERCHE = []
 JOURNAL_RECHERCHE_LOCK = threading.Lock()
 
-# Journal d'exécution propre à chaque run. Il est créé au démarrage du
-# programme et alimenté au fil de l'eau, y compris lorsque plusieurs workers
-# travaillent en parallèle.
-RUN_LOGGER = None
-
-class RunLogger:
-    def __init__(self, output_root):
-        self.started_at = datetime.now()
-        stamp = self.started_at.strftime("%Y-%m-%d_%H-%M-%S")
-        self.run_dir = output_root / "logs" / f"run_{stamp}"
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.execution_path = self.run_dir / "execution.log"
-        self.lock = threading.Lock()
-        self._write_text(self.execution_path, f"{self._ts()} | START | run={self.run_dir.name}\n")
-        # Les fichiers sont créés dès le début du run, même si une étape
-        # ne produit aucune ligne. Cela permet de distinguer "aucune donnée"
-        # d'un fichier de log qui n'aurait jamais été initialisé.
-        headers = {
-            "requetes.csv": ["horodatage", "departement", "nom_departement", "annee", "categorie", "mot_cle", "complement", "lieu", "operateur_web", "famille_operateur", "statut", "nb_resultats", "duree_ms", "url_recherche", "tentative", "erreur"],
-            "candidats.csv": ["horodatage", "etape", "url", "titre", "departement", "annee", "score", "decision_python", "decision_ia", "statut_final", "ia_analyse", "bdd_reutilise"],
-            "recherches_web.csv": ["horodatage", "type", "url", "statut", "duree_ms", "erreur"],
-            "preuves.csv": ["horodatage", "url", "titre", "public_cible", "type_evenement", "niveau_preuve", "preuve_cible", "preuve_evenement", "preuve_date", "preuve_localisation", "qualite_source", "contradiction"],
-            "ia.csv": ["etape", "candidat", "titre", "decision", "confiance", "duree_ms", "statut"],
-            "erreurs.csv": ["horodatage", "etape", "type_erreur", "message", "url", "requete"],
-        }
-        for filename, cols in headers.items():
-            with open(self.run_dir / filename, "w", newline="", encoding="utf-8-sig") as f:
-                import csv
-                csv.writer(f).writerow(cols)
-
-    def _ts(self):
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
-    def _write_text(self, path, text):
-        with self.lock:
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(text)
-
-    def event(self, stage, message="", **fields):
-        parts = [self._ts(), str(stage), str(message)]
-        for k, v in fields.items():
-            parts.append(f"{k}={str(v).replace(chr(10), ' ')}")
-        self._write_text(self.execution_path, " | ".join(parts) + "\n")
-
-    def row(self, filename, **fields):
-        path = self.run_dir / filename
-        with self.lock:
-            exists = path.exists()
-            with open(path, "a", newline="", encoding="utf-8-sig") as f:
-                import csv
-                if not fields:
-                    return
-                writer = csv.DictWriter(f, fieldnames=list(fields.keys()))
-                if not exists:
-                    writer.writeheader()
-                writer.writerow(fields)
-
-    def finish(self, status="OK", **fields):
-        self.event("END", status, **fields)
-
-
 def enregistrer_log_recherche(requete, **infos):
     """Ajoute une ligne au journal de recherche, de façon thread-safe."""
     ligne = {
@@ -272,17 +154,6 @@ def enregistrer_log_recherche(requete, **infos):
     ligne.update(infos)
     with JOURNAL_RECHERCHE_LOCK:
         JOURNAL_RECHERCHE.append(ligne)
-    if RUN_LOGGER is not None:
-        RUN_LOGGER.row("requetes.csv", **ligne)
-        RUN_LOGGER.event(
-            "RSS",
-            ligne.get("statut", ""),
-            requete=ligne.get("mot_cle", ""),
-            departement=ligne.get("departement", ""),
-            annee=ligne.get("annee", ""),
-            resultats=ligne.get("nb_resultats", 0),
-            duree_ms=ligne.get("duree_ms", ""),
-        )
 
 def nettoyer_texte_rapport(valeur):
     return " ".join(unescape(str(valeur or "")).replace("\n", " ").split())
@@ -395,11 +266,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v26-moteur-preuve"
+VERSION_PROGRAMME = "2026-11-25-v24-bdd-candidats-corrige"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-26-v26-preuve"
+REGLES_VERSION = "2026-11-24-v9"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -1508,14 +1379,9 @@ def enrichir_page(resultat):
         return resultat
 
     try:
-        debut_web = time.time()
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.event("WEB", "ouverture_page", url=url)
         session = get_session()
         response = session.get(url, timeout=TIMEOUT, allow_redirects=True)
         response.raise_for_status()
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.row("recherches_web.csv", horodatage=datetime.now().isoformat(timespec="seconds"), type="page", url=url, statut="OK", duree_ms=round((time.time()-debut_web)*1000), erreur="")
 
         content_type = response.headers.get("Content-Type", "").lower()
         if "html" not in content_type:
@@ -1917,101 +1783,6 @@ def parser_date_evenement(valeur):
     return None
 
 
-def construire_preuves_v26(texte, titre, direct, qualifie, entreprise, superieur, exclusions, evenement, preuve_event, niveau_source, date_evenement, geo_ok, hors_geo, editorial):
-    """Construit une lecture explicite de la preuve avant l'IA."""
-    direct_forts = bool(direct)
-    qualifie_recrutement = bool(qualifie and entreprise)
-    superieur_recrutement = bool(superieur and entreprise)
-    contexte_qualifie = bool(qualifie or superieur)
-
-    if direct_forts or qualifie_recrutement or superieur_recrutement:
-        preuve_cible = "FORTE"
-    elif contexte_qualifie:
-        preuve_cible = "MOYENNE"
-    elif entreprise:
-        preuve_cible = "FAIBLE"
-    else:
-        preuve_cible = "ABSENTE"
-
-    if direct_forts:
-        publics = ["CADRES"]
-    elif qualifie_recrutement:
-        publics = ["BAC+3/BAC+5"]
-    elif superieur_recrutement:
-        publics = ["ETUDIANTS_SUPERIEUR"]
-    elif qualifie:
-        publics = ["BAC+3/BAC+5"]
-    elif superieur:
-        publics = ["ETUDIANTS_SUPERIEUR"]
-    elif any(x in texte for x in ("lycéen", "lycéens", "lycée", "collégien", "collégiens", "collège")):
-        publics = ["LYCEENS"]
-    elif any(x in texte for x in ("job étudiant", "job etudiant", "emploi étudiant", "emploi etudiant")):
-        publics = ["JOB_ETUDIANT"]
-    else:
-        publics = ["INCONNU"]
-
-    if "lycéen" in texte or "lycéens" in texte or "lycée" in texte or "collège" in texte or "collégien" in texte or "collégiens" in texte:
-        if "LYCEENS" not in publics:
-            publics.append("LYCEENS")
-    if "job étudiant" in texte or "job etudiant" in texte or "emploi étudiant" in texte or "emploi etudiant" in texte:
-        if "JOB_ETUDIANT" not in publics:
-            publics.append("JOB_ETUDIANT")
-
-    if exclusions and any(x in texte for x in ("lycée", "lycéen", "lycéens", "collège", "collégien", "collégiens")):
-        public_cible = "LYCEENS"
-    elif exclusions and any(x in texte for x in ("job étudiant", "job etudiant", "emploi étudiant", "emploi etudiant")):
-        public_cible = "JOB_ETUDIANT"
-    else:
-        public_cible = publics[0]
-
-    if direct_forts:
-        type_evenement = "RECRUTEMENT" if entreprise else "CAREER"
-    elif superieur and entreprise:
-        type_evenement = "FORUM_ENTREPRISES"
-    elif superieur:
-        type_evenement = "FORMATION_SUPERIEURE"
-    elif entreprise:
-        type_evenement = "SALON_EMPLOI"
-    elif evenement:
-        type_evenement = "EVENEMENT_INDETERMINE"
-    else:
-        type_evenement = "ARTICLE_EDITORIAL" if editorial else "EVENEMENT_INDETERMINE"
-
-    points = 0
-    if evenement: points += 1
-    if preuve_event: points += 1
-    if date_evenement: points += 1
-    if geo_ok and not hors_geo: points += 1
-    if preuve_cible == "FORTE": points += 1
-    elif preuve_cible == "MOYENNE": points += 0.5
-    if niveau_source in (1, 2): points += 1
-    niveau_preuve = 4 if points >= 5 else 3 if points >= 3.5 else 2 if points >= 2 else 1 if points > 0 else 0
-
-    contradictions = []
-    if exclusions:
-        contradictions.extend(exclusions[:5])
-    if public_cible in {"LYCEENS", "JOB_ETUDIANT"} and preuve_cible != "FORTE":
-        contradictions.append("cible non Apec prioritaire")
-    if not evenement:
-        contradictions.append("événement non suffisamment identifié")
-    if not geo_ok or hors_geo:
-        contradictions.append("géographie non démontrée")
-
-    if preuve_cible == "FORTE" and evenement and niveau_source in (1, 2) and not contradictions:
-        niveau_preuve = max(niveau_preuve, 4)
-
-    return {
-        "preuve_cible": preuve_cible,
-        "public_cible": public_cible,
-        "type_evenement_v25": type_evenement,
-        "niveau_preuve": niveau_preuve,
-        "motif_exclusion_v25": "; ".join(contradictions),
-        "preuve_cible_v26": ", ".join(direct[:4] + qualifie[:4] + entreprise[:4] + superieur[:4]) or "ABSENTE",
-        "preuve_evenement_v26": ", ".join(preuve_event[:4]) or "ABSENTE",
-        "contradiction_cible_v26": " | ".join(contradictions) or "AUCUNE",
-    }
-
-
 def calculer_score(resultat):
     """V9 : scoring Apec centré sur événement réel + cible + période + source."""
     titre = normaliser(resultat.get("titre_page") or resultat.get("titre", ""))
@@ -2220,20 +1991,6 @@ def calculer_score(resultat):
         statut = "À vérifier"
         raisons.append("format indirect : vérification nécessaire")
 
-    preuves_v26 = construire_preuves_v26(
-        texte, titre, direct, qualifie, entreprise, superieur, exclusions,
-        evenement, preuve_event, niveau_source, date_evenement, geo_ok, hors_geo, editorial
-    )
-
-    # Règle V26 : un score élevé ne suffit plus. Une cible Apec non démontrée
-    # ne peut jamais être classée automatiquement Pertinent.
-    if statut == "Pertinent" and (preuves_v26["preuve_cible"] == "ABSENTE" or preuves_v26["niveau_preuve"] < 3):
-        statut = "À vérifier"
-        raisons.append("V26 : preuve de cible insuffisante")
-    if statut == "Pertinent" and preuves_v26["motif_exclusion_v25"]:
-        statut = "À vérifier"
-        raisons.append("V26 : contradiction de cible à vérifier")
-
     raison = {
         "Pertinent": "Cible Apec + événement + période suffisamment démontrés",
         "À vérifier": "Signal utile mais preuve ou ciblage à confirmer",
@@ -2243,7 +2000,6 @@ def calculer_score(resultat):
     return {
         "score": score,
         "score_cible_apec": score,
-        **preuves_v26,
         "score_emploi": 10 if event_emploi else 0,
         "score_formation": 3 if _signaux(texte, TERMES_FORMATION) else 0,
         "score_superieur": min(10, 3 * len(superieur)),
@@ -2301,7 +2057,7 @@ def traiter(resultats, memoire_globale=None):
         "motif", "details_score", "evenement_detecte", "preuve_evenement",
         "geographie_verifiee", "annee_detectee", "hors_periode",
         "hors_perimetre", "hors_geographie", "niveau_source_v9",
-        "priorite_2027", "periode", "preuve_cible", "public_cible", "type_evenement_v25", "niveau_preuve", "motif_exclusion_v25", "preuve_cible_v26", "preuve_evenement_v26", "contradiction_cible_v26",
+        "priorite_2027", "periode",
     ]
 
     for resultat in resultats:
@@ -2430,278 +2186,177 @@ def classer_statut_final(resultat, decision):
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
-    """Cascade IA avec mémoire persistante : 3.1 uniquement pour les nouveautés.
+    """Cascade conservatrice : 3 tours Gemini 3.1, puis TOP 3 en 3.8.
 
-    Les événements identiques déjà enrichis lors d'une run précédente sont
-    réutilisés sans appel HTTP de page, sans appel Gemini 3.1 et sans appel
-    Gemini 3.8. Les nouveaux/modifiés passent dans la cascade normale.
+    La BDD/mémoire reste prioritaire : les candidats inchangés déjà analysés
+    ne repassent pas par Gemini. En mode test, le volume peut être limité et
+    la persistance désactivée.
     """
     memoire_ia = memoire_ia or {}
     bdd_candidats = bdd_candidats or preparer_bdd_candidats()
     tous_candidats = pertinents + a_verifier
+    candidats, non_eligibles, hors_perimetre = [], [], []
 
-    candidats = []
-    non_eligibles = []
-    hors_perimetre = []
     for candidat in tous_candidats:
         score = int(candidat.get("score", 0) or 0)
         dept = str(candidat.get("departement", "")).strip()
         erreur_geo = str(candidat.get("erreur_geographique", "")).strip()
-
         if dept and dept not in DEPARTEMENTS_CIBLES:
-            candidat["erreur_geographique"] = "ERREUR_GEOGRAPHIQUE"
-            candidat["decision_ia"] = "IA_NON_REQUISE"
-            candidat["confiance_ia"] = 0
-            candidat["raison_ia"] = f"Hors périmètre géographique : département {dept}."
-            candidat["ia_analyse"] = "NON"
-            candidat["statut_final"] = "Non pertinent"
-            hors_perimetre.append(candidat)
-            continue
-
+            candidat.update({"erreur_geographique":"ERREUR_GEOGRAPHIQUE","decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Hors périmètre géographique : département {dept}.","ia_analyse":"NON","statut_final":"Non pertinent"})
+            hors_perimetre.append(candidat); continue
         if erreur_geo == "ERREUR_GEOGRAPHIQUE":
-            candidat["decision_ia"] = "IA_NON_REQUISE"
-            candidat["confiance_ia"] = 0
-            candidat["raison_ia"] = "Hors périmètre géographique : exclu avant analyse IA."
-            candidat["ia_analyse"] = "NON"
-            candidat["statut_final"] = "Non pertinent"
-            hors_perimetre.append(candidat)
-            continue
-
+            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":"Hors périmètre géographique : exclu avant analyse IA.","ia_analyse":"NON","statut_final":"Non pertinent"})
+            hors_perimetre.append(candidat); continue
         if score < 0:
-            candidat["decision_ia"] = "IA_NON_REQUISE"
-            candidat["confiance_ia"] = 0
-            candidat["raison_ia"] = f"Score négatif : {score}. Exclu du filtrage IA."
-            candidat["ia_analyse"] = "NON"
-            candidat["statut_final"] = candidat.get("statut", "À vérifier")
-            non_eligibles.append(candidat)
-            continue
-
+            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Score négatif : {score}. Exclu du filtrage IA.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
+            non_eligibles.append(candidat); continue
         if score >= GEMINI_SCORE_MIN:
             candidats.append(candidat)
         else:
-            candidat["decision_ia"] = "IA_NON_REQUISE"
-            candidat["confiance_ia"] = 0
-            candidat["raison_ia"] = f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}."
-            candidat["ia_analyse"] = "NON"
-            candidat["statut_final"] = candidat.get("statut", "À vérifier")
+            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
             non_eligibles.append(candidat)
 
     candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
-
-    # 0) BDD persistante : les candidats déjà analysés et inchangés sont
-    # restaurés directement et ne repassent pas dans les recherches/IA.
-    candidats_nouveaux_bdd, candidats_modifies_bdd, candidats_reutilises_bdd = classifier_candidats_bdd(
-        candidats, bdd_candidats
-    )
-    candidats_bdd_a_analyser = candidats_nouveaux_bdd + candidats_modifies_bdd
-
-    # 1) Mémoire globale : seuls les nouveaux/modifiés/à rafraîchir passent
-    # dans les trois recherches lourdes.
+    nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
+    a_analyser_bdd = nouveaux_bdd + modifies_bdd
     memoire_globale = charger_memoire_globale()
-    candidats_a_verifier, _ = appliquer_memoire_globale(candidats_bdd_a_analyser, memoire_globale)
-    # 2) Mémoire IA détaillée : réutilisation des enrichissements déjà connus.
-    candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats_a_verifier, memoire_ia)
-    enrichir_candidats_ia(candidats_a_traiter)
-    for candidat in candidats_a_traiter:
-        try:
-            candidat.update(calculer_score(candidat))
-        except Exception:
-            pass
+    a_verifier_memoire, _ = appliquer_memoire_globale(a_analyser_bdd, memoire_globale)
+    a_traiter, memorises = appliquer_memoire_ia(a_verifier_memoire, memoire_ia)
+    enrichir_candidats_ia(a_traiter)
+    for c in a_traiter:
+        try: c.update(calculer_score(c))
+        except Exception: pass
 
-    # Les candidats déjà analysés par la BDD sont déjà des résultats finaux.
-    ia_resultats = list(candidats_reutilises_bdd) + list(candidats_memorises)
+    if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
+        a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
+
+    ia_resultats = list(reutilises_bdd) + list(memorises)
     quota_bloque = False
     erreurs_consecutives = 0
-    appels_31 = 0
-    appels_38 = 0
+    appels_31 = appels_38 = 0
 
-    print()
+    print("\n========================================")
+    print("IA V28 — 3 TOURS 3.1 + TOP 3 EN 3.8")
     print("========================================")
-    print("COUCHE IA GEMINI — CASCADE 3.1 → 3.8 + MÉMOIRE")
-    print("========================================")
-    print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
-    print(f"Candidats après filtre : {len(candidats)}")
-    print(f"BDD : {len(candidats_reutilises_bdd)} déjà analysés / {len(candidats_nouveaux_bdd)} nouveaux / {len(candidats_modifies_bdd)} modifiés")
-    print(f"Réutilisés depuis mémoire IA : {len(candidats_memorises)}")
-    print(f"Nouveaux/modifiés à analyser : {len(candidats_a_traiter)}")
-    print("Gemini 3.1 Flash Lite : nouveaux/modifiés uniquement | cooldown 10 s")
-    print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} nouveaux/modifiés | cooldown 60 s")
-    print(flush=True)
+    print(f"Règles : {IA_RULES_VERSION}")
+    print(f"Candidats filtrés : {len(candidats)}")
+    print(f"BDD : {len(reutilises_bdd)} réutilisés / {len(nouveaux_bdd)} nouveaux / {len(modifies_bdd)} modifiés")
+    print(f"Mémoire IA : {len(memorises)} réutilisés")
+    print(f"À analyser : {len(a_traiter)}" + (f" | MODE TEST, max {IA_TEST_MAX_CANDIDATS}" if IA_TEST_MODE else ""))
+    print(f"3.1 : 3 tours, cooldown {COOLDOWN_31_SECONDS}s | 3.8 : TOP {MAX_IA_38}, cooldown {COOLDOWN_38_SECONDS}s")
 
-    dernier_appel_31 = 0.0
-    for position, resultat in enumerate(candidats_a_traiter, 1):
-        if dernier_appel_31:
-            attente = COOLDOWN_31_SECONDS - (time.time() - dernier_appel_31)
-            if attente > 0:
-                time.sleep(attente)
+    def appel_avec_cooldown(fn, args, cooldown, dernier):
+        if dernier:
+            attente = cooldown - (time.time() - dernier)
+            if attente > 0: time.sleep(attente)
+        resultat = fn(*args)
+        return resultat, time.time()
 
-        print(f"[IA 3.1] {position}/{len(candidats_a_traiter)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.event("IA31", "appel", position=position, titre=court(resultat.get("titre", "")), url=resultat.get("url", ""))
-        debut_ia31 = time.time()
-        analyse = analyser_resultat_31(resultat)
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.row("ia.csv", etape="3.1", candidat=resultat.get("url", ""), titre=court(resultat.get("titre", "")), decision=analyse.get("decision_ia", ""), confiance=analyse.get("confiance_ia", ""), duree_ms=round((time.time()-debut_ia31)*1000), statut="OK" if analyse.get("decision_ia") != "IA_INDISPONIBLE" else "ERREUR")
-        dernier_appel_31 = time.time()
+    # PHASE 1 — 3.1 TOUR 1
+    t1_ok = []
+    dernier = 0.0
+    for i, r in enumerate(a_traiter, 1):
+        print(f"[PHASE 1/4 — 3.1 T1] {i}/{len(a_traiter)} — {court(r.get('titre',''))}", flush=True)
+        analyse, dernier = appel_avec_cooldown(analyser_resultat_31, (r,), COOLDOWN_31_SECONDS, dernier)
         appels_31 += 1
-
-        resultat.update(analyse)
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.row("candidats.csv", horodatage=datetime.now().isoformat(timespec="seconds"), etape="ia31", url=resultat.get("url", ""), titre=court(resultat.get("titre", "")), departement=resultat.get("departement", ""), annee=resultat.get("annee_detectee", resultat.get("annee", "")), score=resultat.get("score", ""), decision_python=resultat.get("statut", ""), decision_ia=analyse.get("decision_ia", ""), statut_final="", ia_analyse="OUI", bdd_reutilise=resultat.get("bdd_reutilise", ""))
-        resultat["ia_analyse"] = "OUI"
-        resultat["memoire_ia"] = "NON"
-        resultat["modele_ia_1"] = "gemini-3.1-flash-lite"
-        resultat["decision_ia_1"] = analyse.get("decision_ia", "IA_INDISPONIBLE")
-        resultat["confiance_ia_1"] = analyse.get("confiance_ia", 0)
-        resultat["raison_ia_1"] = analyse.get("raison_ia", "")
-        resultat["escalade_38"] = "NON"
-
-        decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
-        resultat["date_ia"] = normaliser_date_ia(resultat.get("date_ia", ""))
-
-        dept_python = str(resultat.get("departement", "")).strip()
-        dept_ia = str(resultat.get("departement_ia", "")).strip()
-        if dept_python and dept_ia and dept_ia != dept_python:
-            resultat["raison_ia"] = (str(resultat.get("raison_ia", "")) + " | Conflit de département avec Python : vérification requise.").strip(" |")
-            resultat["decision_ia"] = "A_VERIFIER"
-            decision = "A_VERIFIER"
-        if dept_ia and dept_ia not in DEPARTEMENTS_CIBLES:
-            resultat["decision_ia"] = "A_VERIFIER"
-            decision = "A_VERIFIER"
-
-        if decision == "IA_INDISPONIBLE":
+        r.update(analyse)
+        r["ia_analyse"] = "OUI"; r["memoire_ia"] = "NON"
+        r["decision_ia_1"] = analyse.get("decision_ia_1", "IA_INDISPONIBLE")
+        r["confiance_ia_1"] = analyse.get("confiance_ia_1", 0)
+        r["raison_ia_1"] = analyse.get("raison_ia_1", "")
+        if r["decision_ia_1"] == "IA_INDISPONIBLE":
             erreurs_consecutives += 1
         else:
             erreurs_consecutives = 0
-
         if erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
-            quota_bloque = True
-            print(f"⛔ Arrêt 3.1 après {erreurs_consecutives} erreurs consécutives", flush=True)
-            for restant in candidats_a_traiter[position:]:
-                restant["decision_ia"] = "IA_NON_ANALYSE"
-                restant["confiance_ia"] = 0
-                restant["raison_ia"] = "Analyse 3.1 interrompue après erreurs Gemini consécutives."
-                restant["ia_analyse"] = "NON"
-                restant["statut_final"] = restant.get("statut", "À vérifier")
-                ia_resultats.append(restant)
-            break
+            quota_bloque = True; break
+        t1_ok.append(r)
 
-        classer_statut_final(resultat, decision)
-        ia_resultats.append(resultat)
+    # PHASE 2 — 3.1 TOUR 2 : contre-analyse
+    t2_ok = []
+    dernier = 0.0
+    for i, r in enumerate(t1_ok, 1):
+        print(f"[PHASE 2/4 — 3.1 T2] {i}/{len(t1_ok)} — {court(r.get('titre',''))}", flush=True)
+        t1 = {k:v for k,v in r.items() if k.endswith('_31') or k in {"decision_ia_1","confiance_ia_1","raison_ia_1","preuves_31","public_cible_31","type_evenement_31"}}
+        analyse, dernier = appel_avec_cooldown(analyser_resultat_31_tour2, (r, t1), COOLDOWN_31_SECONDS, dernier)
+        appels_31 += 1; r.update(analyse)
+        if analyse.get("decision_ia_31_t2") == "IA_INDISPONIBLE":
+            r["raison_ia_31_t2"] = "Tour 2 indisponible : Tour 1 conservé."
+        t2_ok.append(r)
 
-    candidats_38 = [
-        r for r in ia_resultats
-        if r.get("decision_ia_1") in {"PERTINENT", "A_VERIFIER"}
-        and r.get("ia_analyse") == "OUI"
-        and r.get("memoire_ia") != "OUI"
-    ]
+    # PHASE 3 — 3.1 TOUR 3 : tranche
+    t3_ok = []
+    dernier = 0.0
+    for i, r in enumerate(t2_ok, 1):
+        print(f"[PHASE 3/4 — 3.1 T3] {i}/{len(t2_ok)} — {court(r.get('titre',''))}", flush=True)
+        t1 = {k:v for k,v in r.items() if k.endswith('_31') or k in {"decision_ia_1","confiance_ia_1","raison_ia_1","preuves_31","public_cible_31"}}
+        t2 = {k:v for k,v in r.items() if '31_t2' in k}
+        analyse, dernier = appel_avec_cooldown(analyser_resultat_31_tour3, (r, t1, t2), COOLDOWN_31_SECONDS, dernier)
+        appels_31 += 1; r.update(analyse)
+        decision = analyse.get("decision_ia_31_t3", "A_VERIFIER")
+        if decision == "IA_INDISPONIBLE":
+            decision = r.get("decision_ia_1", "A_VERIFIER")
+            r["raison_ia_31_t3"] = "Tour 3 indisponible : décision Tour 1 conservée."
+        r["decision_ia"] = decision
+        r["confiance_ia"] = analyse.get("confiance_ia_31_t3", r.get("confiance_ia_1", 0))
+        r["raison_ia"] = analyse.get("raison_ia_31_t3", r.get("raison_ia_1", ""))
+        r["modele_ia"] = MODEL_31 if 'MODEL_31' in globals() else "gemini-3.1-flash-lite"
+        r["analyse_humaine"] = r.get("raison_ia_31_t3", "")
+        classer_statut_final(r, r["decision_ia"])
+        t3_ok.append(r)
 
-    def score_importance_38(r):
-        decision = r.get("decision_ia_1", "")
-        rang = {"PERTINENT": 3, "A_VERIFIER": 2}.get(decision, 0)
-        confiance = int(r.get("confiance_ia_1", 0) or 0)
-        score_python = int(r.get("score", 0) or 0)
-        priorite = str(r.get("priorite_2027", "")).upper()
-        bonus = 20 if "FORTE" in priorite else (10 if "MOYENNE" in priorite else 0)
-        direct = 10 if r.get("score_cible_apec", 0) >= 20 else 0
-        return (rang, confiance, score_python + bonus + direct)
+    # Sélection intelligente : pertinence + incertitude + désaccord, pas score Python seul.
+    def priorite_38(r):
+        d1 = r.get("decision_ia_1", ""); d2 = r.get("decision_ia_31_t2", ""); d3 = r.get("decision_ia_31_t3", r.get("decision_ia", ""))
+        c3 = int(r.get("confiance_ia_31_t3", 0) or 0)
+        py = int(r.get("score", 0) or 0)
+        conflit = 35 if len({d1,d2,d3}) > 1 else (15 if d1 != d3 or d2 != d3 else 0)
+        incert = max(0, 100-c3)
+        fort = 20 if d3 == "PERTINENT" else (12 if d3 == "A_VERIFIER" else 0)
+        p2027 = 15 if "FORTE" in str(r.get("priorite_2027", "")).upper() else 0
+        return (conflit + incert + fort + p2027, py, c3)
 
-    candidats_38.sort(key=score_importance_38, reverse=True)
-    top_38 = candidats_38[:MAX_IA_38]
+    top_38 = sorted([r for r in t3_ok if r.get("ia_analyse") == "OUI"], key=priorite_38, reverse=True)[:MAX_IA_38]
 
-    print()
-    print("========================================")
-    print("RÉ-ENRICHISSEMENT GEMINI 3.8")
-    print("========================================")
-    print(f"Candidats 3.1 nouveaux disponibles : {len(candidats_38)}")
-    print(f"Top 3.8 sélectionné : {len(top_38)}/{MAX_IA_38}")
-    print(flush=True)
-
-    dernier_appel_38 = 0.0
-    for position, resultat in enumerate(top_38, 1):
-        if dernier_appel_38:
-            attente = COOLDOWN_38_SECONDS - (time.time() - dernier_appel_38)
-            if attente > 0:
-                print(f"[IA 3.8] cooldown : {attente:.0f}s", flush=True)
-                time.sleep(attente)
-
-        print(f"[IA 3.8] {position}/{len(top_38)} — ré-enrichissement — {court(resultat.get('titre', ''))}", flush=True)
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.event("IA38", "appel", position=position, titre=court(resultat.get("titre", "")), url=resultat.get("url", ""))
-        debut_ia38 = time.time()
-        analyse38 = analyser_resultat_38(resultat, resultat)
-        if RUN_LOGGER is not None:
-            RUN_LOGGER.row("ia.csv", etape="3.8", candidat=resultat.get("url", ""), titre=court(resultat.get("titre", "")), decision=analyse38.get("arbitrage_38", ""), confiance=analyse38.get("confiance_ia_2", ""), duree_ms=round((time.time()-debut_ia38)*1000), statut="OK" if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE" else "ERREUR")
-        dernier_appel_38 = time.time()
-        appels_38 += 1
-        resultat.update(analyse38)
-        resultat["escalade_38"] = "OUI"
-        resultat["motif_escalade_38"] = "Top candidat après analyse Gemini 3.1"
-
-        if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE":
-            arbitrage = str(analyse38.get("arbitrage_38", "AUCUN")).upper()
-            confiance38 = int(analyse38.get("confiance_ia_2", 0) or 0)
-            decision31 = resultat.get("decision_ia_1", resultat.get("decision_ia", "A_VERIFIER"))
-            decision_finale = decision31
-            if arbitrage == "RETROGRADER":
-                decision_finale = "A_VERIFIER"
-            elif arbitrage == "REJETER" and confiance38 >= 80:
-                decision_finale = "NON_PERTINENT"
-            elif arbitrage in {"CONFIRMER", "AUCUN"}:
-                decision_finale = decision31
-            resultat["decision_ia_38"] = arbitrage
-            resultat["confiance_ia_38"] = confiance38
-            resultat["raison_ia_38"] = analyse38.get("raison_ia_2", "")
-            resultat["modele_ia_38"] = analyse38.get("modele_ia_2", "gemini-3.8-flash")
-            resultat["decision_ia"] = decision_finale
-            resultat["confiance_ia"] = min(int(resultat.get("confiance_ia_1", 0) or 0), confiance38) if arbitrage in {"RETROGRADER", "REJETER"} else int(resultat.get("confiance_ia_1", 0) or 0)
-            resultat["raison_ia"] = (
-                str(resultat.get("raison_ia_1", ""))
-                + " | ARBITRAGE 3.8 [" + arbitrage + "]: "
-                + str(analyse38.get("raison_ia_2", ""))
-            ).strip(" |")
-            resultat["modele_ia"] = "gemini-3.1-flash-lite + gemini-3.8-flash"
-            classer_statut_final(resultat, resultat["decision_ia"])
+    # PHASE 4 — 3.8 : expertise senior sur TOP 3
+    dernier = 0.0
+    for i, r in enumerate(top_38, 1):
+        print(f"[PHASE 4/4 — 3.8] {i}/{len(top_38)} — {court(r.get('titre',''))}", flush=True)
+        analyse38, dernier = appel_avec_cooldown(analyser_resultat_38, (r, r), COOLDOWN_38_SECONDS, dernier)
+        appels_38 += 1; r.update(analyse38); r["escalade_38"] = "OUI"; r["motif_escalade_38"] = "Top candidat après 3 tours Gemini 3.1"
+        if analyse38.get("decision_ia_38") != "IA_INDISPONIBLE":
+            r["decision_ia"] = analyse38.get("decision_ia_38", r.get("decision_ia"))
+            r["confiance_ia"] = analyse38.get("confiance_ia_38", r.get("confiance_ia", 0))
+            r["raison_ia"] = analyse38.get("raison_ia_38", r.get("raison_ia", ""))
+            r["analyse_humaine"] = analyse38.get("analyse_humaine_38", r.get("analyse_humaine", ""))
+            r["action_recommandee"] = analyse38.get("action_recommandee_38", r.get("action_recommandee_31_t3", ""))
+            r["modele_ia"] = "gemini-3.1-flash-lite ×3 + gemini-3.8-flash"
+            classer_statut_final(r, r["decision_ia"])
         else:
-            resultat["modele_ia"] = "gemini-3.1-flash-lite"
-            resultat["raison_ia"] = str(resultat.get("raison_ia_1", "")) + " | 3.8 indisponible, analyse 3.1 conservée."
+            r["escalade_38"] = "ECHEC"; r["raison_ia"] = str(r.get("raison_ia", "")) + " | 3.8 indisponible, décision 3.1 T3 conservée."
 
-    for resultat in non_eligibles:
-        ia_resultats.append(resultat)
-
-    nouveaux_pertinents = [r for r in ia_resultats if r.get("decision_ia") == "PERTINENT"]
-    nouveaux_a_verifier = [r for r in ia_resultats if r.get("decision_ia") == "A_VERIFIER"]
-    nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
-    nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-    # Les décisions mémorisées n'ont pas besoin d'être recalculées par Gemini.
+    ia_resultats.extend(t3_ok)
+    ia_resultats.extend(non_eligibles)
     for r in ia_resultats:
         if r.get("memoire_ia") == "OUI":
             r["decision_ia"] = r.get("decision_ia") or r.get("decision_ia_1", "A_VERIFIER")
-            r["modele_ia"] = r.get("modele_ia") or r.get("modele_ia_1", "MEMOIRE")
-            classer_statut_final(r, r.get("decision_ia", "A_VERIFIER"))
+            classer_statut_final(r, r["decision_ia"])
 
-    print()
-    print(f"Analyses Gemini 3.1 effectuées cette run : {appels_31}")
-    print(f"Enrichissements Gemini 3.8 effectués cette run : {appels_38}/{MAX_IA_38}")
-    print(f"Réutilisations mémoire BDD : {len(candidats_reutilises_bdd)}")
-    print(f"Réutilisations mémoire IA : {len(candidats_memorises)}")
+    nouveaux_pertinents = sorted([r for r in ia_resultats if r.get("decision_ia") == "PERTINENT"], key=lambda x:x.get("confiance_ia",0), reverse=True)
+    nouveaux_a_verifier = sorted([r for r in ia_resultats if r.get("decision_ia") == "A_VERIFIER"], key=lambda x:x.get("score",0), reverse=True)
+
+    print(f"\nAnalyses Gemini 3.1 : {appels_31} ({len(t3_ok)} candidats × 3 si complet)")
+    print(f"Gemini 3.8 : {appels_38}/{MAX_IA_38}")
+    print(f"Top 3 sélectionné : {len(top_38)}")
+    print(f"Réutilisations BDD : {len(reutilises_bdd)} | mémoire IA : {len(memorises)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
 
-    # Persistance : uniquement les candidats effectivement analysés cette run.
-    # Les candidats interrompus par une erreur restent donc retraitables.
-    a_persister = [
-        r for r in ia_resultats
-        if r.get("bdd_reutilise") is not True
-        and (r.get("ia_analyse") == "OUI" or r.get("memoire_ia") == "OUI")
-    ]
-    if a_persister:
-        enregistrer_candidats_bdd(a_persister, bdd_candidats)
-    print(
-        "Décisions finales : "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinents / "
-        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier"
-    )
+    if not (IA_TEST_MODE and IA_TEST_NO_PERSIST):
+        a_persister = [r for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("ia_analyse") == "OUI"]
+        if a_persister:
+            enregistrer_candidats_bdd(a_persister, bdd_candidats)
+    else:
+        print("🧪 MODE TEST : aucune persistance BDD pour cette phase.")
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
 
@@ -3607,20 +3262,17 @@ def importer_historique_runs_dans_bdd(bdd):
 
 
 def main():
-    global RUN_LOGGER, meta_resultats
-    DATA.mkdir(exist_ok=True)
-    OUTPUT.mkdir(exist_ok=True)
-    with JOURNAL_RECHERCHE_LOCK:
-        JOURNAL_RECHERCHE.clear()
-    RUN_LOGGER = RunLogger(OUTPUT)
-    RUN_LOGGER.event("CONFIG", "demarrage_avant_bdd", version=VERSION_PROGRAMME, regles=REGLES_VERSION)
-
     bdd_candidats = preparer_bdd_candidats()
     stats_historique_runs = importer_historique_runs_dans_bdd(bdd_candidats)
     stats_bdd_candidats = {
         "taille_avant_run": len(bdd_candidats.get("items", {}))
     }
+    global meta_resultats
+
     debut_total = time.time()
+
+    DATA.mkdir(exist_ok=True)
+    OUTPUT.mkdir(exist_ok=True)
 
     print()
     print("========================================")
@@ -3637,20 +3289,16 @@ def main():
     sauvegarder_suivi_taches()
 
     ancienne_veille = charger_ancienne_veille()
-    RUN_LOGGER.event("MEMOIRE", "ancienne_veille_chargee", lignes=len(ancienne_veille))
 
     departements = load_yaml("departements.yml")
     requetes = construire_requetes(departements)
 
     print()
     print(f"Requêtes générées : {len(requetes)}")
-    RUN_LOGGER.event("CONFIG", "requetes_generees", total=len(requetes), departements=",".join(sorted(DEPARTEMENTS_CIBLES)))
 
     demarrer_tache(0, f"{len(requetes)} requêtes")
     try:
-        RUN_LOGGER.event("ETAPE", "collecte_rss_debut", total=len(requetes))
         resultats_bruts, erreurs = collecter(requetes)
-        RUN_LOGGER.event("ETAPE", "collecte_rss_fin", resultats=len(resultats_bruts), erreurs=erreurs)
         terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {erreurs} erreurs")
     except Exception as e:
         echouer_tache(0, str(e))
@@ -3673,7 +3321,6 @@ def main():
             {int(a) for a in departements["annees"] if int(a) >= ANNEE_MIN}
             | {ANNEE_PRIORITAIRE}
         )
-        RUN_LOGGER.event("ETAPE", "sources_externes_debut")
         externes = collecter_sources_externes(
             sources_yml=load_yaml_optionnel("sources.yml"),
             extra=load_yaml_optionnel("sources_collecte.yml"),
@@ -3688,21 +3335,17 @@ def main():
         externes = []
         terminer_tache(1, "ERREUR", erreur=f"{type(e).__name__}: {e}")
     else:
-        RUN_LOGGER.event("ETAPE", "sources_externes_fin", resultats=len(externes))
         terminer_tache(1, details=f"{len(externes)} résultats externes")
 
     # Export du journal de recherche après la collecte RSS + sources externes.
     try:
-        RUN_LOGGER.event("ETAPE", "rapport_recherche_debut")
         generer_rapports_recherche(
             requetes, resultats_bruts, erreurs,
             duree_collecte=time.time() - debut_total,
             resultats_externes=len(externes),
             erreurs_externes=0,
         )
-        RUN_LOGGER.event("ETAPE", "rapport_recherche_fin")
     except Exception as e:
-        RUN_LOGGER.event("ERROR", "rapport_recherche", erreur=f"{type(e).__name__}: {e}")
         print(f"⚠️ Journal de recherche non généré : {type(e).__name__} : {e}")
 
     resultats_bruts = externes + resultats_bruts
@@ -3724,30 +3367,9 @@ def main():
     # réutilise directement son score Python et ses composants, sans refaire
     # calculer_score(). Les nouveaux/modifiés sont recalculés puis mémorisés.
     memoire_globale = charger_memoire_globale()
-    RUN_LOGGER.event("MEMOIRE", "memoire_globale_chargee", items=len(memoire_globale.get("items", {})) if isinstance(memoire_globale, dict) else len(memoire_globale or []))
 
     demarrer_tache(2, f"{len(resultats_bruts)} résultats bruts")
-    RUN_LOGGER.event("ETAPE", "scoring_debut", candidats=len(resultats_bruts))
     pertinents, a_verifier, non_pertinents = traiter(resultats_bruts, memoire_globale)
-    if RUN_LOGGER is not None:
-        for c in pertinents + a_verifier + non_pertinents:
-            RUN_LOGGER.row(
-                "candidats.csv", horodatage=datetime.now().isoformat(timespec="seconds"),
-                etape="scoring", url=c.get("url", ""), titre=court(c.get("titre", "")),
-                departement=c.get("departement", ""), annee=c.get("annee_detectee", c.get("annee", "")),
-                score=c.get("score", ""), decision_python=c.get("statut", c.get("decision_python", "")),
-                decision_ia="", statut_final="", ia_analyse="NON", bdd_reutilise=c.get("bdd_reutilise", ""),
-            )
-            RUN_LOGGER.row(
-                "preuves.csv", horodatage=datetime.now().isoformat(timespec="seconds"),
-                url=c.get("url", ""), titre=court(c.get("titre", "")),
-                public_cible=c.get("public_cible", c.get("public_cible_detecte", "")),
-                type_evenement=c.get("type_evenement", ""), niveau_preuve=c.get("niveau_preuve", ""),
-                preuve_cible=c.get("preuve_cible", ""), preuve_evenement=c.get("preuve_evenement", ""),
-                preuve_date=c.get("preuve_date", ""), preuve_localisation=c.get("preuve_localisation", ""),
-                qualite_source=c.get("qualite_source", ""), contradiction=c.get("contradiction_cible", ""),
-            )
-    RUN_LOGGER.event("ETAPE", "scoring_fin", pertinents=len(pertinents), a_verifier=len(a_verifier), non_pertinents=len(non_pertinents))
     terminer_tache(2, details=f"{len(pertinents)+len(a_verifier)+len(non_pertinents)} résultats conservés après traitement")
 
     demarrer_tache(3)
@@ -3758,7 +3380,6 @@ def main():
     # --------------------------------------------------------
     demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
     memoire_ia = charger_memoire_ia()
-    RUN_LOGGER.event("IA", "cascade_debut", candidats=len(pertinents) + len(a_verifier))
     pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
         pertinents,
         a_verifier,
@@ -3795,7 +3416,6 @@ def main():
         print(f"🧠 Mémoire globale sauvegardée : {GLOBAL_MEMORY_FILE}")
     except Exception as e:
         print(f"⚠️ Impossible de sauvegarder la mémoire globale : {type(e).__name__} : {e}")
-    RUN_LOGGER.event("IA", "cascade_fin", resultats=len(ia_resultats))
     terminer_tache(5, details=f"{len(ia_resultats)} candidats traités")
 
     # Les candidats que l'IA déclare NON_PERTINENT restent dans
@@ -3895,7 +3515,6 @@ def main():
         terminer_tache(11, "TERMINEE", details=sorties_v10.get("raison", ""))
     sauvegarder_suivi_taches()
     duree_total = time.time() - debut_total
-    RUN_LOGGER.finish("OK" if sauvegarde_ok else "NON_VALIDE", duree_s=round(duree_total, 2), resultats=len(resultats_bruts), pertinents=len(pertinents), a_verifier=len(a_verifier), non_pertinents=len(non_pertinents))
 
     print()
     print("========================================")
@@ -3928,4 +3547,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    nettoyer_output()
