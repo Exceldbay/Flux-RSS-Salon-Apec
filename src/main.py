@@ -3036,9 +3036,12 @@ def sauvegarder(
     # Fichier dédié à l'audit IA.
     candidats_ia = [
         r for r in tous
-        if r.get("ia_analyse") in ("OUI", "MEMOIRE")
-        or r.get("decision_ia") == "IA_INDISPONIBLE"
-        or r.get("decision_ia") == "IA_NON_ANALYSE"
+        if r.get("bdd_reutilise") is not True
+        and (
+            r.get("ia_analyse") in ("OUI", "MEMOIRE")
+            or r.get("decision_ia") == "IA_INDISPONIBLE"
+            or r.get("decision_ia") == "IA_NON_ANALYSE"
+        )
     ]
 
     def cle_tri_ia(resultat):
@@ -3803,6 +3806,29 @@ def main():
         bdd_candidats,
     )
 
+    # ========================================================
+    # DELTA D'AFFICHAGE — UNIQUEMENT NOUVEAUX / MODIFIÉS
+    # ========================================================
+    # La BDD conserve tout l'historique, mais aucun candidat simplement
+    # réutilisé ne doit réapparaître dans les sorties du run courant.
+    # Un candidat modifié est considéré comme nouveau pour l'affichage du
+    # jour, car son contenu/source a changé depuis sa dernière analyse.
+    resultats_du_jour = [
+        r for r in ia_resultats
+        if r.get("bdd_reutilise") is not True
+    ]
+    urls_du_jour = {str(r.get("url") or "").strip() for r in resultats_du_jour}
+    urls_du_jour.discard("")
+    resultats_bruts_du_jour = [
+        r for r in resultats_bruts
+        if str(r.get("url") or "").strip() in urls_du_jour
+    ]
+
+    print(
+        f"📌 Affichage du jour : {len(resultats_du_jour)} nouveaux/modifiés | "
+        f"{len(ia_resultats) - len(resultats_du_jour)} anciens réutilisés masqués"
+    )
+
     # La BDD candidats est alimentée uniquement après une analyse terminée.
     # Les candidats nouveaux/modifiés sont ainsi disponibles à la prochaine
     # run, tandis que les candidats inchangés seront réutilisés sans nouvel
@@ -3862,10 +3888,17 @@ def main():
     )
 
     print()
-    print(f"Après dédoublonnage : {total_dedoublonne}")
-    print(f"Pertinents : {len(pertinents)}")
-    print(f"À vérifier : {len(a_verifier)}")
-    print(f"Non pertinents : {len(non_pertinents)}")
+    print("========================================")
+    print("RÉSULTATS DU JOUR — ANCIENS MASQUÉS")
+    print("========================================")
+    pertinents_jour = [r for r in resultats_du_jour if r.get("decision_ia") == "PERTINENT"]
+    a_verifier_jour = [r for r in resultats_du_jour if r.get("decision_ia") == "A_VERIFIER"]
+    non_pertinents_jour = [r for r in resultats_du_jour if r.get("decision_ia") == "NON_PERTINENT"]
+    print(f"Nouveaux/modifiés affichés : {len(resultats_du_jour)}")
+    print(f"Pertinents du jour : {len(pertinents_jour)}")
+    print(f"À vérifier du jour : {len(a_verifier_jour)}")
+    print(f"Non pertinents du jour : {len(non_pertinents_jour)}")
+    print(f"Anciens candidats masqués : {len(ia_resultats) - len(resultats_du_jour)}")
 
     # Priorités 8-10 : delta, performance des opérateurs et sortie Teams.
     actuels_utiles = pertinents + a_verifier
@@ -3921,7 +3954,7 @@ def main():
 
     demarrer_tache(10)
     sorties_v10 = executer_sorties_v8_v10(
-        delta, stats_operateurs, pertinents, a_verifier, non_pertinents, ia_resultats, resultats_bruts
+        delta, stats_operateurs, pertinents, a_verifier, non_pertinents, resultats_du_jour, resultats_bruts
     )
 
     terminer_tache(10, details="Payload Teams préparé")
@@ -3957,12 +3990,12 @@ def main():
         generer_rapport_pdf_unique(
             delta=locals().get("delta"),
             stats_operateurs=locals().get("stats_operateurs"),
-            pertinents=pertinents_ia,
-            a_verifier=a_verifier_ia,
-            non_pertinents=non_pertinents,
-            ia_resultats=ia_resultats,
-            resultats_bruts=resultats_bruts,
-            externes=externes,
+            pertinents=[r for r in pertinents_ia if r.get("bdd_reutilise") is not True],
+            a_verifier=[r for r in a_verifier_ia if r.get("bdd_reutilise") is not True],
+            non_pertinents=[r for r in non_pertinents if r.get("bdd_reutilise") is not True],
+            ia_resultats=resultats_du_jour,
+            resultats_bruts=resultats_bruts_du_jour,
+            externes=[r for r in externes if str(r.get("url") or "").strip() in urls_du_jour],
             erreurs=erreurs,
             duree_total=duree_total,
             appels_31=locals().get("appels_31", 0),
