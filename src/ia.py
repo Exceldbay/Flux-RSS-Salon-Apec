@@ -46,143 +46,69 @@ def _appel_modele(client, modele, prompt):
     return json.loads(texte)
 
 def _construire_prompt_31(resultat):
-    champs = {
-        "titre": resultat.get("titre", ""),
-        "description": resultat.get("description", ""),
-        "source": resultat.get("source", ""),
-        "url": resultat.get("url", ""),
-        "date": resultat.get("date_publication", ""),
-        "annee_recherchee": resultat.get("annee_recherchee", ""),
-        "annee_detectee": resultat.get("annee_detectee", ""),
-        "departement": resultat.get("departement", ""),
-        "evenement": resultat.get("evenement_detecte", ""),
-        "geographie": resultat.get("geographie_verifiee", ""),
-        "score": resultat.get("score_cible_apec", resultat.get("score", 0)),
-        "signaux_cible": resultat.get("signaux_cible_apec", ""),
-        "signaux_superieur": resultat.get("signaux_superieur", ""),
-        "signaux_entreprise": resultat.get("signaux_entreprise", ""),
-        "signaux_exclusion": resultat.get("signaux_exclusion", ""),
-        "titre_page": resultat.get("titre_page", ""),
-        "description_page": resultat.get("description_page", ""),
-        "date_page": resultat.get("date_evenement_page", ""),
-        "lieu_page": resultat.get("lieu_page", ""),
-        "organisateur_page": resultat.get("organisateur_page", ""),
-    }
-    return f"""
-Tu es l'analyste final d'une veille événementielle Apec.
+    return f"""Tu es le filtre qualité d'une veille événementielle Apec.
 
-CIBLE PRIORITAIRE
-L'Apec s'intéresse principalement :
-- aux cadres en poste ou en recherche ;
-- aux managers, experts et cadres dirigeants ;
-- aux jeunes diplômés Bac+3/Bac+5 et plus ;
-- aux étudiants de l'enseignement supérieur proches du diplôme ;
-- aux masters, écoles d'ingénieurs, écoles de commerce, grandes écoles,
-  universités, IAE, doctorants, docteurs et alumni ;
-- aux relations entreprises/recruteurs lorsqu'elles concernent ces publics.
+OBJECTIF
+Décider si la page décrit un VRAI événement exploitable pour une veille Apec, dans les départements 86,79,87,17,16,23,19 et les années 2026-2027, priorité 2027.
 
-ZONE : 86, 79, 87, 17, 16, 23, 19.
-ANNÉES : 2025, 2026, 2027.
+RÈGLE ABSOLUE DE CIBLE
+Un simple mot-clé comme emploi, formation, étudiant, université, recrutement ou forum ne prouve PAS la cible Apec. Tu dois identifier QUI est réellement visé et citer la preuve disponible.
 
-PRINCIPE ESSENTIEL
-Ne demande jamais que les mots « cadre » ou « jeune diplômé » soient présents.
-La pertinence peut être démontrée indirectement par le contexte.
+PERTINENT seulement si :
+- cadres/managers/dirigeants/jeunes diplômés explicitement ciblés ; OU
+- enseignement supérieur + entreprises/recruteurs + public supérieur clairement identifiable ; OU
+- Bac+3/Bac+5/master/ingénieurs/école/grande école/IAE/alumni + entreprises/recrutement/carrière ; OU
+- mobilité, évolution professionnelle ou reconversion destinée à des actifs qualifiés/cadres ; OU
+- événement Apec/Apec Connect.
 
-PERTINENT si l'un de ces cas est suffisamment démontré :
-1. cadres, managers, experts, dirigeants ou jeunes diplômés explicitement ciblés ;
-2. université/IAE/école supérieure + entreprises/employeurs/recruteurs +
-   étudiants/diplômés ;
-3. école d'ingénieurs, école de commerce ou grande école + entreprises,
-   recrutement, carrière ou insertion ;
-4. master/Bac+5/doctorat/ingénieurs/alumni + entreprises, recrutement,
-   carrière ou insertion ;
-5. rencontre entreprises, forum entreprises ou job dating dans un
-   établissement supérieur avec public qualifié ;
-6. mobilité, évolution professionnelle ou reconversion destinée à des actifs
-   qualifiés/cadres ;
-7. événement Apec ou Apec Connect.
+A_VERIFIER si l'événement est crédible mais que le public qualifié, la relation recrutement ou une autre preuve essentielle manque.
 
-EXEMPLES
-- « Forum entreprises – Université de Poitiers » peut être PERTINENT même sans
-  le mot « cadre » si la relation université + entreprises + étudiants/diplômés
-  est clairement établie.
-- « Rencontre entreprises / étudiants – Université X » peut être PERTINENT.
-- « Forum entreprises – école d'ingénieurs » est généralement PERTINENT.
+NON_PERTINENT si public lycée/collège, job étudiant/saisonnier, petits boulots, intérim généraliste, emplois sans qualification, article éditorial sans événement identifiable, hors zone, ou exclusion claire.
 
-A_VERIFIER lorsque le potentiel Apec est réel mais qu'une information
-importante manque :
-- forum emploi avec employeurs mais public non précisé ;
-- événement universitaire avec entreprises mais niveau de diplôme non précisé ;
-- événement carrière/recrutement dont le public qualifié est plausible mais
-  pas suffisamment documenté.
+NE JAMAIS INVENTER. Si l'information n'est pas dans les données, écris INCONNU.
 
-NON_PERTINENT si :
-- jobs étudiants, jobs d'été ou saisonniers ;
-- petits boulots ;
-- restauration, caisse, manutention, préparation de commandes ;
-- intérim généraliste sans public qualifié ;
-- emplois sans qualification ;
-- collège, lycée, post-3e ;
-- orientation générale pré-Bac+3 sans dimension Apec ;
-- événement purement commercial ou grand public sans intérêt professionnel ;
-- CCI comme événement ;
-- événement non identifiable ;
-- article éditorial qui ne permet pas d'identifier l'événement ;
-- hors zone lorsque cela est démontré.
+DONNÉES STRUCTURÉES
+Score Python : {resultat.get('score',0)}
+Statut Python : {resultat.get('statut','')}
+Preuve cible Python : {resultat.get('preuve_cible','')}
+Public cible Python : {resultat.get('public_cible','')}
+Niveau preuve Python : {resultat.get('niveau_preuve',0)}
+Type événement Python : {resultat.get('type_evenement_v25','')}
+Motif exclusion Python : {resultat.get('motif_exclusion_v25','')}
+Signaux cible : {resultat.get('signaux_cible_apec','')}
+Signaux supérieur : {resultat.get('signaux_superieur','')}
+Signaux entreprises : {resultat.get('signaux_entreprise','')}
+Signaux exclusion : {resultat.get('signaux_exclusion','')}
+Détails score : {resultat.get('details_score','')}
 
-IMPORTANT
-Un simple mot « emploi », « formation », « étudiant » ou « recrutement »
-ne suffit pas.
-Mais une combinaison cohérente de signaux doit être valorisée.
-
-En cas de doute entre NON_PERTINENT et un intérêt Apec plausible,
-choisis A_VERIFIER. Ne transforme pas une absence d'information en preuve
-d'absence.
-
-DONNÉES PYTHON
-Score : {champs["score"]}
-Cible directe : {champs["signaux_cible"]}
-Enseignement supérieur : {champs["signaux_superieur"]}
-Relation entreprises : {champs["signaux_entreprise"]}
-Exclusions : {champs["signaux_exclusion"]}
-
-SOURCE RSS
-Titre : {champs["titre"]}
-Description : {champs["description"]}
-Source : {champs["source"]}
-Date publication : {champs["date"]}
-Année recherchée : {champs["annee_recherchee"]}
-Année détectée : {champs["annee_detectee"]}
-Département : {champs["departement"]}
-Événement détecté : {champs["evenement"]}
-Géographie vérifiée : {champs["geographie"]}
-URL : {champs["url"]}
+SOURCE
+Titre : {resultat.get('titre','')}
+Description : {resultat.get('description','')}
+Source : {resultat.get('source','')}
+URL : {resultat.get('url','')}
+Département : {resultat.get('departement','')}
+Année détectée : {resultat.get('annee_detectee','')}
 
 PAGE ENRICHIE
-Titre : {champs["titre_page"]}
-Description : {champs["description_page"]}
-Date événement : {champs["date_page"]}
-Lieu : {champs["lieu_page"]}
-Organisateur : {champs["organisateur_page"]}
-
-DÉCISION
-PERTINENT = intérêt Apec clairement ou fortement démontré.
-A_VERIFIER = potentiel réel mais preuve insuffisante.
-NON_PERTINENT = hors cible ou exclusion claire.
-
-Ne jamais inventer une date, un lieu, un public, un diplôme ou un organisateur.
-La confiance est un entier de 0 à 100.
+Titre : {resultat.get('titre_page','')}
+Description : {resultat.get('description_page','')}
+Date événement : {resultat.get('date_evenement_page','')}
+Lieu : {resultat.get('lieu_page','')}
+Organisateur : {resultat.get('organisateur_page','')}
 
 Réponds UNIQUEMENT avec ce JSON :
 {{
   "decision": "PERTINENT|A_VERIFIER|NON_PERTINENT",
   "confiance": 0,
-  "raison": "explication courte et factuelle",
+  "raison": "une phrase factuelle indiquant le public et la preuve ou l'absence de preuve",
   "categorie": "emploi|recrutement|formation|enseignement_superieur|alumni|portes_ouvertes|reconversion|entreprises_rh|autre",
+  "public_cible": "CADRES|JEUNES_DIPLOMES|BAC+5|BAC+3|ETUDIANTS_SUPERIEUR|ALUMNI|LYCEENS|JOB_ETUDIANT|GRAND_PUBLIC|INCONNU",
+  "preuve_cible": "FORTE|MOYENNE|FAIBLE|ABSENTE",
+  "type_evenement": "RECRUTEMENT|CAREER|FORUM_ENTREPRISES|FORMATION_SUPERIEURE|ALUMNI|PORTES_OUVERTES_SUPERIEUR|JOB_DATING|SALON_EMPLOI|SALON_ETUDIANT|ARTICLE_EDITORIAL|EVENEMENT_INDETERMINE",
+  "preuve": "preuve textuelle courte ou INCONNUE",
   "date": "",
   "departement": ""
-}}
-"""
+}}"""
 
 def _normaliser_decision(data):
     decision = data.get("decision", "A_VERIFIER")
@@ -217,43 +143,52 @@ def analyser_resultat_31(resultat):
 
 
 def _prompt_38(resultat, analyse31):
-    return f"""Tu es le second niveau d'analyse d'une veille événementielle Apec.
+    return f"""Tu es le contrôleur qualité final d'une veille Apec.
 
-Tu dois RÉ-ENRICHIR l'analyse Gemini 3.1 ci-dessous, pas la remplacer mécaniquement. Vérifie les éléments disponibles et apporte uniquement des précisions justifiées. Ne rien inventer.
+Tu ne dois PAS remplacer mécaniquement Gemini 3.1. Tu dois vérifier ses erreurs potentielles avec les preuves structurées disponibles.
 
-ANALYSE GEMINI 3.1
+RÈGLE : une promotion en PERTINENT est interdite si la preuve de cible Apec est faible/absente ou si l'événement n'est pas clairement identifiable. Une exclusion doit être justifiée par une preuve concrète.
+
+GEMINI 3.1
 Décision : {analyse31.get('decision_ia_1', analyse31.get('decision_ia',''))}
 Confiance : {analyse31.get('confiance_ia_1', analyse31.get('confiance_ia',0))}
 Raison : {analyse31.get('raison_ia_1', analyse31.get('raison_ia',''))}
 
-DONNÉES ÉVÉNEMENT
+PYTHON
+Score : {resultat.get('score',0)}
+Statut : {resultat.get('statut','')}
+Preuve cible : {resultat.get('preuve_cible','')}
+Public cible : {resultat.get('public_cible','')}
+Niveau preuve : {resultat.get('niveau_preuve',0)}
+Type événement : {resultat.get('type_evenement_v25','')}
+Exclusion : {resultat.get('motif_exclusion_v25','')}
+Signaux : {resultat.get('signaux_cible_apec','')} | {resultat.get('signaux_superieur','')} | {resultat.get('signaux_entreprise','')}
+
+ÉVÉNEMENT
 Titre : {resultat.get('titre','')}
 Description : {resultat.get('description','')}
 Source : {resultat.get('source','')}
 URL : {resultat.get('url','')}
-Département : {resultat.get('departement','')}
-Année : {resultat.get('annee_detectee', resultat.get('annee_recherchee',''))}
-Score Python : {resultat.get('score_cible_apec', resultat.get('score',0))}
-Signaux cible : {resultat.get('signaux_cible_apec','')}
-Signaux supérieur : {resultat.get('signaux_superieur','')}
-Signaux entreprises : {resultat.get('signaux_entreprise','')}
-Page : {resultat.get('titre_page','')} | {resultat.get('description_page','')}
-Date événement : {resultat.get('date_evenement_page','')}
+Titre page : {resultat.get('titre_page','')}
+Description page : {resultat.get('description_page','')}
+Date : {resultat.get('date_evenement_page','')}
 Lieu : {resultat.get('lieu_page','')}
 Organisateur : {resultat.get('organisateur_page','')}
 
-OBJECTIF
-Renforce l'analyse sur : public visé, niveau de qualification, relation entreprises/recrutement, intérêt cadres/jeunes diplômés, importance Apec et priorité 2027.
+ARBITRAGE
+- CONFIRMER : la décision 3.1 est cohérente avec les preuves.
+- RETROGRADER : la décision 3.1 est trop positive ; revenir à A_VERIFIER.
+- REJETER : preuve forte que le candidat est hors cible ; utiliser seulement si la confiance est >= 80.
+- AUCUN : pas assez d'éléments pour modifier 3.1.
 
-Retourne UNIQUEMENT ce JSON :
+Réponds UNIQUEMENT avec ce JSON :
 {{
-  "decision": "PERTINENT|A_VERIFIER|NON_PERTINENT",
+  "arbitrage": "CONFIRMER|RETROGRADER|REJETER|AUCUN",
   "confiance": 0,
-  "raison": "raison finale enrichie et factuelle",
-  "enrichissement": "ce que le 3.8 apporte par rapport au 3.1",
-  "priorite_38": "TRES_FORTE|FORTE|MOYENNE"
+  "raison": "constat factuel et court",
+  "enrichissement": "élément nouveau ou vérification apportée",
+  "priorite_38": "TRES_FORTE|FORTE|MOYENNE|FAIBLE"
 }}"""
-
 
 def analyser_resultat_38(resultat, analyse31):
     """Ré-enrichissement des meilleurs candidats par Gemini 3.8 Flash."""
@@ -263,8 +198,15 @@ def analyser_resultat_38(resultat, analyse31):
     try:
         client=genai.Client(api_key=api_key)
         data=_appel_modele(client, MODEL_38, _prompt_38(resultat, analyse31))
-        decision, confiance=_normaliser_decision(data)
-        return {"modele_ia_2":MODEL_38,"decision_ia_2":decision,"confiance_ia_2":confiance,"raison_ia_2":data.get("raison",""),"enrichissement_38":data.get("enrichissement",""),"priorite_38":data.get("priorite_38","")}
+        arbitrage = str(data.get("arbitrage", "AUCUN")).upper()
+        if arbitrage not in {"CONFIRMER", "RETROGRADER", "REJETER", "AUCUN"}:
+            arbitrage = "AUCUN"
+        try:
+            confiance = int(data.get("confiance", 0))
+        except (TypeError, ValueError):
+            confiance = 0
+        confiance = max(0, min(100, confiance))
+        return {"modele_ia_2":MODEL_38,"decision_ia_2":"ARBITRAGE_OK","arbitrage_38":arbitrage,"confiance_ia_2":confiance,"raison_ia_2":data.get("raison",""),"enrichissement_38":data.get("enrichissement",""),"priorite_38":data.get("priorite_38","")}
     except genai_errors.APIError as e:
         return {"modele_ia_2":MODEL_38,"decision_ia_2":"IA_INDISPONIBLE","confiance_ia_2":0,"raison_ia_2":f"Gemini 3.8 HTTP {getattr(e,'code','?')} : {str(getattr(e,'message',str(e)))[:500]}","enrichissement_38":""}
     except Exception as e:
