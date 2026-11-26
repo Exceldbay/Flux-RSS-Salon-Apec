@@ -42,7 +42,7 @@ DEPARTEMENTS_NOMS = {
 # est présent sans département/code postal. Cette liste ne sert jamais à
 # exclure une ville mentionnée uniquement comme origine du public.
 VILLES_HORS_CIBLE = {
-    "bordeaux","tours","paris","limoges","nice","agen","poitiers","la rochelle",
+    "bordeaux","tours","paris","nice","agen",
     "nantes","angers","toulouse","montpellier","lille","rennes","nîmes","nimes",
     "orléans","orleans","clermont-ferrand","clermont ferrand","dijon","grenoble",
     "lyon","marseille","strasbourg","mulhouse","metz","nancy","rouen","caen",
