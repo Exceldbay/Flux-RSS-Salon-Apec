@@ -1,10 +1,180 @@
 import os
 import json
+import re
+import unicodedata
 from google import genai
 from google.genai import errors as genai_errors
 
 MODEL_31 = os.getenv("GEMINI_MODEL_31", "gemini-3.1-flash-lite")
 MODEL_38 = os.getenv("GEMINI_MODEL_38", "gemini-3.8-flash")
+
+
+# ============================================================
+# PRÉ-ANALYSE GÉOGRAPHIQUE IA — SANS APPEL GEMINI
+# ============================================================
+# Cette étape appartient à la couche IA mais reste locale et gratuite.
+# Elle intervient avant les 3 tours Gemini afin d'éviter de consommer
+# des appels sur des événements manifestement hors périmètre.
+
+DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
+DEPARTEMENTS_NOMS = {
+    "01":"ain","02":"aisne","03":"allier","04":"alpes-de-haute-provence","05":"hautes-alpes",
+    "06":"alpes-maritimes","07":"ardeche","08":"ardennes","09":"ariege","10":"aube","11":"aude",
+    "12":"aveyron","13":"bouches-du-rhone","14":"calvados","15":"cantal","16":"charente",
+    "17":"charente-maritime","18":"cher","19":"correze","23":"creuse","24":"dordogne",
+    "25":"doubs","26":"drome","27":"eure","28":"eure-et-loir","29":"finistere",
+    "30":"gard","31":"haute-garonne","32":"gers","33":"gironde","34":"herault",
+    "35":"ille-et-vilaine","36":"indre","37":"indre-et-loire","38":"isere","39":"jura",
+    "40":"landes","41":"loir-et-cher","42":"loire","43":"haute-loire","44":"loire-atlantique",
+    "45":"loiret","46":"lot","47":"lot-et-garonne","48":"lozere","49":"maine-et-loire",
+    "50":"manche","51":"marne","52":"haute-marne","53":"mayenne","54":"meurthe-et-moselle",
+    "55":"meuse","56":"morbihan","57":"moselle","58":"nievre","59":"nord","60":"oise",
+    "61":"orne","62":"pas-de-calais","63":"puy-de-dome","64":"pyrenees-atlantiques",
+    "65":"hautes-pyrenees","66":"pyrenees-orientales","67":"bas-rhin","68":"haut-rhin","69":"rhone",
+    "70":"haute-saone","71":"saone-et-loire","72":"sarthe","73":"savoie","74":"haute-savoie",
+    "75":"paris","76":"seine-maritime","77":"seine-et-marne","78":"yvelines","79":"deux-sevres",
+    "80":"somme","81":"tarn","82":"tarn-et-garonne","83":"var","84":"vaucluse","85":"vendee",
+    "86":"vienne","87":"haute-vienne","88":"vosges","89":"yonne","90":"territoire de belfort",
+    "91":"essonne","92":"hauts-de-seine","93":"seine-saint-denis","94":"val-de-marne","95":"val-d-oise",
+}
+
+# Grandes villes hors périmètre utiles pour les cas où seul le nom de ville
+# est présent sans département/code postal. Cette liste ne sert jamais à
+# exclure une ville mentionnée uniquement comme origine du public.
+VILLES_HORS_CIBLE = {
+    "bordeaux","tours","paris","limoges","nice","agen","poitiers","la rochelle",
+    "nantes","angers","toulouse","montpellier","lille","rennes","nîmes","nimes",
+    "orléans","orleans","clermont-ferrand","clermont ferrand","dijon","grenoble",
+    "lyon","marseille","strasbourg","mulhouse","metz","nancy","rouen","caen",
+    "amiens","le mans","le havre","saint-nazaire","mont-de-marsan","pau","bayonne",
+    "périgueux","perigueux","bergerac","libourne","langon","chambéry","chambery",
+    "saint-malo","colmar","alès","ales","montauban","avignon","troyes","reims",
+}
+
+DEPARTEMENTS_CIBLES_NOMS = {DEPARTEMENTS_NOMS[c] for c in DEPARTEMENTS_CIBLES}
+
+def _geo_norm(value):
+    value = unicodedata.normalize("NFKD", str(value or "").lower())
+    value = "".join(c for c in value if not unicodedata.combining(c))
+    value = re.sub(r"[^a-z0-9\s-]", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+def _contient_mot(texte, mot):
+    return bool(re.search(r"(?<![a-z0-9])" + re.escape(mot) + r"(?![a-z0-9])", texte))
+
+def preanalyser_geographie(resultat):
+    """Pré-analyse géographique avant Gemini.
+
+    Priorité aux champs qui décrivent le LIEU DE L'ÉVÉNEMENT. Une mention
+    d'une autre ville dans le public, l'organisateur ou le contenu général
+    ne suffit pas à exclure l'événement.
+
+    Retourne un dictionnaire avec décision, zones détectées et niveau de
+    confiance. Décision : GEO_CIBLE_CONFIRMEE / GEO_HORS_CIBLE /
+    GEO_AMBIGUE / GEO_INCONNUE.
+    """
+    champs_lieu = [
+        resultat.get("lieu_page", ""),
+        resultat.get("lieu", ""),
+        resultat.get("adresse_page", ""),
+    ]
+    champs_evenement = [
+        resultat.get("titre_page", ""),
+        resultat.get("titre", ""),
+        resultat.get("description_page", ""),
+        resultat.get("description", ""),
+    ]
+    lieu = _geo_norm(" ".join(str(x or "") for x in champs_lieu))
+    evenement = _geo_norm(" ".join(str(x or "") for x in champs_evenement))
+    texte_cible = lieu if lieu else evenement
+
+    zones = []
+    codes = []
+    villes = []
+    hors = []
+
+    # 1. Code postal dans un champ de lieu : preuve très forte.
+    for cp in re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", lieu):
+        code = cp[:2]
+        codes.append(code)
+        if code in DEPARTEMENTS_CIBLES:
+            zones.append(f"{cp} ({DEPARTEMENTS_NOMS.get(code, code)})")
+        else:
+            hors.append(f"{cp} ({DEPARTEMENTS_NOMS.get(code, code)})")
+
+    # 2. Nom de département dans le lieu.
+    for code, nom in DEPARTEMENTS_NOMS.items():
+        nom_n = _geo_norm(nom)
+        if nom_n and _contient_mot(texte_cible, nom_n):
+            codes.append(code)
+            zones.append(f"{nom} ({code})") if code in DEPARTEMENTS_CIBLES else hors.append(f"{nom} ({code})")
+
+    # 3. Ville hors cible uniquement lorsqu'elle est utilisée comme lieu.
+    for ville in VILLES_HORS_CIBLE:
+        if _contient_mot(texte_cible, _geo_norm(ville)):
+            villes.append(ville)
+            hors.append(ville)
+
+    # 4. Indices de lieu dans le titre/texte : « à Bordeaux », « Bordeaux - »,
+    # « Bordeaux, 33000 », etc. On reste volontairement prudent.
+    for ville in VILLES_HORS_CIBLE:
+        vn = _geo_norm(ville)
+        if re.search(r"(?:\ba\s+|\bà\s+|[-–|/]\s*|,\s*)" + re.escape(vn) + r"(?:\s*[,|/-]|\s+\d{5}|$)", evenement):
+            if ville not in hors:
+                hors.append(ville)
+            if ville not in villes:
+                villes.append(ville)
+
+    # Nettoyage des doublons.
+    codes = sorted(set(codes))
+    zones = list(dict.fromkeys(zones))
+    villes = list(dict.fromkeys(villes))
+    hors = list(dict.fromkeys(hors))
+
+    # Une preuve hors cible dans le champ lieu prime immédiatement.
+    if hors and (lieu or any(re.search(r"(?:\ba\s+|\bà\s+|[-–|/]\s*|,\s*)" + re.escape(_geo_norm(v)) + r"(?:\s*[,|/-]|\s+\d{5}|$)", evenement) for v in villes)):
+        return {
+            "geo_preanalyse": "GEO_HORS_CIBLE",
+            "geo_confiance": 100,
+            "geo_zones_detectees": "; ".join(zones),
+            "geo_departements_detectes": "; ".join(codes),
+            "geo_villes_detectees": "; ".join(villes),
+            "geo_hors_cible": "; ".join(hors),
+            "geo_motif": "Lieu d'événement explicitement hors des 7 départements cibles.",
+        }
+
+    if codes and any(c in DEPARTEMENTS_CIBLES for c in codes):
+        return {
+            "geo_preanalyse": "GEO_CIBLE_CONFIRMEE",
+            "geo_confiance": 95,
+            "geo_zones_detectees": "; ".join(zones),
+            "geo_departements_detectes": "; ".join(codes),
+            "geo_villes_detectees": "; ".join(villes),
+            "geo_hors_cible": "; ".join(hors),
+            "geo_motif": "Lieu explicitement rattaché à un département cible.",
+        }
+
+    dept_requete = str(resultat.get("departement", "")).strip()
+    if dept_requete in DEPARTEMENTS_CIBLES:
+        return {
+            "geo_preanalyse": "GEO_AMBIGUE",
+            "geo_confiance": 55,
+            "geo_zones_detectees": "; ".join(zones),
+            "geo_departements_detectes": "; ".join(codes),
+            "geo_villes_detectees": "; ".join(villes),
+            "geo_hors_cible": "; ".join(hors),
+            "geo_motif": f"Le département de recherche est cible ({dept_requete}) mais le lieu précis n'est pas confirmé.",
+        }
+
+    return {
+        "geo_preanalyse": "GEO_INCONNUE",
+        "geo_confiance": 0,
+        "geo_zones_detectees": "; ".join(zones),
+        "geo_departements_detectes": "; ".join(codes),
+        "geo_villes_detectees": "; ".join(villes),
+        "geo_hors_cible": "; ".join(hors),
+        "geo_motif": "Aucun lieu exploitable identifié.",
+    }
 
 
 def _appel_modele(client, modele, prompt):
@@ -79,13 +249,16 @@ Signaux supérieur : {resultat.get('signaux_superieur','')}
 Signaux entreprises : {resultat.get('signaux_entreprise','')}
 Signaux exclusion : {resultat.get('signaux_exclusion','')}
 Priorité 2027 : {resultat.get('priorite_2027','')}
+Pré-analyse géographique : {resultat.get('geo_preanalyse','')} | confiance {resultat.get('geo_confiance','')}
+Zones détectées : {resultat.get('geo_zones_detectees','')}
+Hors cible détecté : {resultat.get('geo_hors_cible','')}
 """
 
 
 def _regles():
     return """
 Tu analyses une veille événementielle destinée à l'Apec.
-Zone : départements 16, 17, 19, 23, 79, 86, 87.
+Zone : départements 16, 17, 19, 23, 79, 86, 87. Toute localisation d'événement explicitement hors de ces 7 départements est éliminatoire. Une ville citée comme origine du public, siège de l'organisateur ou partenaire ne doit pas être confondue avec le lieu de l'événement.
 Priorité : 2027, puis 2026.
 
 Cible : cadres, managers, experts, dirigeants, jeunes diplômés Bac+3/Bac+5+, masters,
