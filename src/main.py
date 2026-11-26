@@ -79,7 +79,7 @@ CONFIG = ROOT / "config"
 DATA = ROOT / "data"
 OUTPUT = ROOT / "output"
 IA_MEMORY_FILE = DATA / "ia_memoire.json"
-IA_MEMORY_VERSION = "v2-global"
+IA_MEMORY_VERSION = "v26-preuve"
 GLOBAL_MEMORY_FILE = DATA / "memoire_veille_globale.json"
 MEMORY_REFRESH_DAYS = int(os.getenv("MEMORY_REFRESH_DAYS", "7"))
 # BDD persistante des candidats déjà analysés
@@ -91,6 +91,51 @@ CANDIDATS_BDD_VERSION = "v1"
 HISTORIQUE_RUNS_DIR = OUTPUT
 HISTORIQUE_MAX_FICHIERS = int(os.getenv("HISTORIQUE_MAX_FICHIERS", "100"))
 HISTORIQUE_MAX_LIGNES_PAR_FICHIER = int(os.getenv("HISTORIQUE_MAX_LIGNES_PAR_FICHIER", "5000"))
+
+# Nettoyage de output : on conserve les 7 derniers lots de journaux
+# (CSV + DOCX + PDF) pour garder une trace exploitable sans faire grossir
+# inutilement le dépôt Git. Les fichiers Teams temporaires sont supprimés.
+OUTPUT_KEEP_JOURNAL_RUNS = int(os.getenv("OUTPUT_KEEP_JOURNAL_RUNS", "7"))
+OUTPUT_TRANSIENT_FILES = {"teams_payload.json", "teams_result.json"}
+
+def nettoyer_output():
+    """Nettoie uniquement les sorties générées et temporaires connues.
+
+    Les 7 derniers horodatages de journal sont conservés. Les autres fichiers
+    présents dans output/ ne sont jamais supprimés automatiquement.
+    """
+    try:
+        OUTPUT.mkdir(exist_ok=True)
+        groupes = {}
+        for f in OUTPUT.glob("journal_recherche_*"):
+            if not f.is_file():
+                continue
+            m = re.match(r"journal_recherche_(\d{8}_\d{6})\.(csv|docx|pdf)$", f.name)
+            if m:
+                groupes.setdefault(m.group(1), set()).add(f)
+        horodatages = sorted(groupes.keys(), reverse=True)
+        a_conserver = set(horodatages[:max(0, OUTPUT_KEEP_JOURNAL_RUNS)])
+        supprimes = 0
+        for ts, fichiers in groupes.items():
+            if ts not in a_conserver:
+                for f in fichiers:
+                    try:
+                        f.unlink()
+                        supprimes += 1
+                    except OSError as exc:
+                        print(f"⚠️ Impossible de supprimer {f.name}: {exc}")
+        for nom in OUTPUT_TRANSIENT_FILES:
+            f = OUTPUT / nom
+            if f.exists():
+                try:
+                    f.unlink()
+                    supprimes += 1
+                except OSError as exc:
+                    print(f"⚠️ Impossible de supprimer {f.name}: {exc}")
+        print(f"🧹 Nettoyage output : {supprimes} fichier(s) supprimé(s), {len(a_conserver)} lot(s) de journaux conservé(s).")
+    except Exception as exc:
+        print(f"⚠️ Nettoyage output ignoré : {type(exc).__name__}: {exc}")
+
 
 
 SUIVI_TACHES_JSON = DATA / "suivi_taches.json"
@@ -262,11 +307,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v25-scoring-ia-qualite"
+VERSION_PROGRAMME = "2026-11-26-v26-moteur-preuve"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-26-v25"
+REGLES_VERSION = "2026-11-26-v26-preuve"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -1700,34 +1745,6 @@ EXCLUSIONS_FORTES = [
     "lycée", "post-bac", "après le bac", "orientation des lycéens",
 ]
 
-# V25 : preuve de cible — un mot-clé Apec ne suffit plus à rendre un événement pertinent.
-CIBLE_CADRES = [
-    "cadre", "cadres", "cadre dirigeant", "cadres dirigeants", "manager",
-    "managers", "dirigeant", "dirigeants", "jeune diplômé", "jeunes diplômés",
-    "jeune diplômée", "jeunes diplômées", "jeunes talents", "talents",
-    "graduate", "graduate program", "graduate programme",
-]
-
-CIBLE_SUPERIEUR = [
-    "bac+3", "bac+4", "bac+5", "master", "mastère", "mba", "doctorat",
-    "doctorant", "doctorants", "docteur", "ingénieur", "ingénieurs",
-    "école d'ingénieurs", "école d’ingénieurs", "école de commerce",
-    "grande école", "grandes écoles", "iae", "université", "universitaire",
-    "alumni", "anciens élèves",
-]
-
-CIBLE_PUBLIC_LYCEE = [
-    "lycéen", "lycéens", "lycéenne", "lycéennes", "lycée", "collégien",
-    "collégiens", "collège", "post-3e", "après la 3e", "avant le bac",
-]
-
-BLOCAGE_PUBLIC = [
-    "job étudiant", "jobs étudiants", "emploi étudiant", "emplois étudiants",
-    "job d'été", "jobs d'été", "job saisonnier", "jobs saisonniers",
-    "emploi saisonnier", "emplois saisonniers", "petits boulots", "intérim",
-    "sans diplôme", "sans qualification", "niveau cap", "niveau bep",
-]
-
 EXCLUSIONS_EDITORIAL = [
     "actualités", "actualité", "portrait", "interview", "tribune", "édito",
     "palmarès", "retour sur", "en images", "recensement", "vie locale",
@@ -1807,14 +1824,112 @@ def parser_date_evenement(valeur):
     return None
 
 
+def construire_preuves_v26(texte, titre, direct, qualifie, entreprise, superieur, exclusions, evenement, preuve_event, niveau_source, date_evenement, geo_ok, hors_geo, editorial):
+    """Construit une lecture explicite de la preuve avant l'IA."""
+    direct_forts = bool(direct)
+    qualifie_recrutement = bool(qualifie and entreprise)
+    superieur_recrutement = bool(superieur and entreprise)
+    contexte_qualifie = bool(qualifie or superieur)
+
+    if direct_forts or qualifie_recrutement or superieur_recrutement:
+        preuve_cible = "FORTE"
+    elif contexte_qualifie:
+        preuve_cible = "MOYENNE"
+    elif entreprise:
+        preuve_cible = "FAIBLE"
+    else:
+        preuve_cible = "ABSENTE"
+
+    if direct_forts:
+        publics = ["CADRES"]
+    elif qualifie_recrutement:
+        publics = ["BAC+3/BAC+5"]
+    elif superieur_recrutement:
+        publics = ["ETUDIANTS_SUPERIEUR"]
+    elif qualifie:
+        publics = ["BAC+3/BAC+5"]
+    elif superieur:
+        publics = ["ETUDIANTS_SUPERIEUR"]
+    elif any(x in texte for x in ("lycéen", "lycéens", "lycée", "collégien", "collégiens", "collège")):
+        publics = ["LYCEENS"]
+    elif any(x in texte for x in ("job étudiant", "job etudiant", "emploi étudiant", "emploi etudiant")):
+        publics = ["JOB_ETUDIANT"]
+    else:
+        publics = ["INCONNU"]
+
+    if "lycéen" in texte or "lycéens" in texte or "lycée" in texte or "collège" in texte or "collégien" in texte or "collégiens" in texte:
+        if "LYCEENS" not in publics:
+            publics.append("LYCEENS")
+    if "job étudiant" in texte or "job etudiant" in texte or "emploi étudiant" in texte or "emploi etudiant" in texte:
+        if "JOB_ETUDIANT" not in publics:
+            publics.append("JOB_ETUDIANT")
+
+    if exclusions and any(x in texte for x in ("lycée", "lycéen", "lycéens", "collège", "collégien", "collégiens")):
+        public_cible = "LYCEENS"
+    elif exclusions and any(x in texte for x in ("job étudiant", "job etudiant", "emploi étudiant", "emploi etudiant")):
+        public_cible = "JOB_ETUDIANT"
+    else:
+        public_cible = publics[0]
+
+    if direct_forts:
+        type_evenement = "RECRUTEMENT" if entreprise else "CAREER"
+    elif superieur and entreprise:
+        type_evenement = "FORUM_ENTREPRISES"
+    elif superieur:
+        type_evenement = "FORMATION_SUPERIEURE"
+    elif entreprise:
+        type_evenement = "SALON_EMPLOI"
+    elif evenement:
+        type_evenement = "EVENEMENT_INDETERMINE"
+    else:
+        type_evenement = "ARTICLE_EDITORIAL" if editorial else "EVENEMENT_INDETERMINE"
+
+    points = 0
+    if evenement: points += 1
+    if preuve_event: points += 1
+    if date_evenement: points += 1
+    if geo_ok and not hors_geo: points += 1
+    if preuve_cible == "FORTE": points += 1
+    elif preuve_cible == "MOYENNE": points += 0.5
+    if niveau_source in (1, 2): points += 1
+    niveau_preuve = 4 if points >= 5 else 3 if points >= 3.5 else 2 if points >= 2 else 1 if points > 0 else 0
+
+    contradictions = []
+    if exclusions:
+        contradictions.extend(exclusions[:5])
+    if public_cible in {"LYCEENS", "JOB_ETUDIANT"} and preuve_cible != "FORTE":
+        contradictions.append("cible non Apec prioritaire")
+    if not evenement:
+        contradictions.append("événement non suffisamment identifié")
+    if not geo_ok or hors_geo:
+        contradictions.append("géographie non démontrée")
+
+    if preuve_cible == "FORTE" and evenement and niveau_source in (1, 2) and not contradictions:
+        niveau_preuve = max(niveau_preuve, 4)
+
+    return {
+        "preuve_cible": preuve_cible,
+        "public_cible": public_cible,
+        "type_evenement_v25": type_evenement,
+        "niveau_preuve": niveau_preuve,
+        "motif_exclusion_v25": "; ".join(contradictions),
+        "preuve_cible_v26": ", ".join(direct[:4] + qualifie[:4] + entreprise[:4] + superieur[:4]) or "ABSENTE",
+        "preuve_evenement_v26": ", ".join(preuve_event[:4]) or "ABSENTE",
+        "contradiction_cible_v26": " | ".join(contradictions) or "AUCUNE",
+    }
+
+
 def calculer_score(resultat):
-    """V25 : scoring métier avec preuve obligatoire de la cible Apec."""
+    """V9 : scoring Apec centré sur événement réel + cible + période + source."""
     titre = normaliser(resultat.get("titre_page") or resultat.get("titre", ""))
     description = normaliser(resultat.get("description_page") or resultat.get("description", ""))
-    page = normaliser(" ".join(str(resultat.get(k, "")) for k in (
-        "titre_page", "description_page", "extrait_page", "lieu_page",
-        "organisateur_page", "date_evenement_page"
-    )))
+    source = normaliser(resultat.get("source", ""))
+    page = normaliser(
+        " ".join(str(resultat.get(k, "")) for k in (
+            "titre_page", "description_page", "extrait_page",
+            "lieu_page", "organisateur_page", "date_evenement_page"
+        ))
+    )
     texte = f"{titre} {description} {page}"
     categorie = int(resultat.get("categorie_numero", 0) or 0)
     annee = str(resultat.get("annee_recherchee", ""))
@@ -1835,136 +1950,148 @@ def calculer_score(resultat):
     date_evenement = parser_date_evenement(resultat.get("date_evenement_page", ""))
     annees = extraire_annees(texte)
 
+    # V9.1 : un événement doit être identifiable, pas seulement suggéré par
+    # « emploi », « master », « université », etc.
     event_dans_titre = bool(_signaux(titre, EVENT_SIGNAL_CIBLE))
     event_meta = bool(date_evenement or resultat.get("lieu_page") or resultat.get("organisateur_page"))
-    evenement = bool((event_emploi or event_superieur or event_indirect) and
-                     (event_dans_titre or preuve_event or event_meta or structure_event))
+    evenement = bool(
+        (event_emploi or event_superieur or event_indirect)
+        and (event_dans_titre or preuve_event or event_meta or structure_event)
+    )
+
+    # Une page officielle contenant un intitulé événementiel reste acceptable
+    # même si elle ne contient pas les mots « inscription » ou « programme ».
     niveau_source = classer_fiabilite_source(resultat)
     if not evenement and niveau_source in (1, 2) and event_dans_titre:
         evenement = True
 
-    public_cadres = _signaux(texte, CIBLE_CADRES)
-    public_superieur = _signaux(texte, CIBLE_SUPERIEUR)
-    public_lycee = _signaux(texte, CIBLE_PUBLIC_LYCEE)
-    blocages = _signaux(texte, BLOCAGE_PUBLIC)
-
-    # Preuve de cible : la combinaison compte, pas le simple mot isolé.
-    if public_lycee or blocages:
-        public_cible = "LYCEENS" if public_lycee else "JOB_ETUDIANT_OU_EMPLOI_PRECAIRE"
-    elif public_cadres:
-        public_cible = "CADRES"
-    elif public_superieur and ("alumni" in public_superieur or "anciens élèves" in public_superieur):
-        public_cible = "ALUMNI"
-    elif public_superieur:
-        public_cible = "ETUDIANTS_SUPERIEUR"
-    elif entreprise:
-        public_cible = "EMPLOYEURS_RECRUTEURS"
-    else:
-        public_cible = "INCONNU"
-
-    if public_lycee:
-        preuve_cible = "ABSENTE"
-        niveau_preuve = 0
-        motif_exclusion = "PUBLIC_LYCEEN"
-    elif blocages:
-        preuve_cible = "ABSENTE"
-        niveau_preuve = 0
-        motif_exclusion = "JOB_ETUDIANT_OU_EMPLOI_PRECAIRE"
-    elif public_cadres and (entreprise or qualifie or event_emploi or event_indirect):
-        preuve_cible = "FORTE"
-        niveau_preuve = 3
-        motif_exclusion = ""
-    elif public_superieur and entreprise and (qualifie or superieur):
-        preuve_cible = "FORTE"
-        niveau_preuve = 3
-        motif_exclusion = ""
-    elif (qualifie and entreprise) or (superieur and entreprise):
-        preuve_cible = "MOYENNE"
-        niveau_preuve = 2
-        motif_exclusion = ""
-    elif public_superieur or qualifie or entreprise:
-        preuve_cible = "FAIBLE"
-        niveau_preuve = 1
-        motif_exclusion = ""
-    else:
-        preuve_cible = "ABSENTE"
-        niveau_preuve = 0
-        motif_exclusion = "CIBLE_APEC_NON_DEMONTRÉE"
-
     score = 0
     raisons = []
+
     if evenement:
-        score += 12
-        raisons.append("événement identifiable")
-        if preuve_event: score += 3; raisons.append("preuve événementielle")
-        if date_evenement: score += 4; raisons.append("date événement détectée")
-        if resultat.get("lieu_page"): score += 2; raisons.append("lieu détecté")
+        score += 10
+        raisons.append("vrai événement identifié")
+        if preuve_event:
+            score += 4
+            raisons.append("preuve événementielle")
+        if date_evenement:
+            score += 4
+            raisons.append("date événement détectée")
+        if resultat.get("lieu_page"):
+            score += 2
+            raisons.append("lieu détecté")
     else:
         score -= 18
-        raisons.append("événement insuffisamment démontré")
+        raisons.append("page sans événement suffisamment démontré")
 
-    score += min(18, 6 * len(direct))
-    score += min(12, 3 * len(qualifie))
-    score += min(12, 3 * len(entreprise))
-    score += min(8, 2 * len(superieur))
-    if direct: raisons.append("cible Apec directe: " + ", ".join(direct[:4]))
-    if qualifie: raisons.append("profil qualifié: " + ", ".join(qualifie[:5]))
-    if entreprise: raisons.append("relation entreprises/recrutement: " + ", ".join(entreprise[:5]))
-    if superieur: raisons.append("enseignement supérieur: " + ", ".join(superieur[:4]))
+    # Cible Apec.
+    if direct:
+        score += min(24, 8 * len(direct))
+        raisons.append("cible Apec directe: " + ", ".join(direct[:4]))
 
+    if qualifie:
+        score += min(16, 4 * len(qualifie))
+        raisons.append("profil qualifié: " + ", ".join(qualifie[:5]))
+
+    if superieur:
+        score += min(10, 3 * len(superieur))
+        raisons.append("enseignement supérieur: " + ", ".join(superieur[:4]))
+
+    if entreprise:
+        score += min(16, 4 * len(entreprise))
+        raisons.append("relation entreprises/recrutement: " + ", ".join(entreprise[:5]))
+
+    # Relation particulièrement intéressante pour Apec.
     if superieur and entreprise:
-        score += 6
+        score += 8
         raisons.append("supérieur + entreprises")
 
-    if niveau_source == 1: score += 8; raisons.append("source officielle prioritaire")
-    elif niveau_source == 2: score += 6; raisons.append("source institutionnelle")
-    elif niveau_source == 3: score += 1
-    else: score -= 3
-
-    if categorie == 1 and superieur: score += 2
-    if categorie == 2 and (event_emploi or entreprise): score += 2
-
-    if geo_ok:
-        score += 5; raisons.append("géographie cible vérifiée")
+    # Source.
+    if niveau_source == 1:
+        score += 10
+        raisons.append("source officielle prioritaire")
+    elif niveau_source == 2:
+        score += 7
+        raisons.append("source institutionnelle")
+    elif niveau_source == 3:
+        score += 2
+        raisons.append("source secondaire")
     else:
-        score -= 12; raisons.append("géographie cible non démontrée")
-    if hors_geo:
-        score -= 25; raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
+        score -= 2
+        raisons.append("source faible/non qualifiée")
 
+    # Catégorie de recherche : bonus faible.
+    if categorie == 1 and superieur:
+        score += 3
+    if categorie == 2 and (event_emploi or entreprise):
+        score += 3
+
+    # Géographie.
+    if geo_ok:
+        score += 5
+        raisons.append("géographie cible vérifiée")
+    else:
+        score -= 12
+        raisons.append("géographie cible non démontrée")
+    if hors_geo:
+        score -= 25
+        raisons.append("hors géographie: " + ", ".join(hors_geo[:3]))
+
+    # Exclusions fortes.
     if exclusions:
-        malus = min(45, 15 * len(exclusions))
+        malus = min(35, 12 * len(exclusions))
         score -= malus
         raisons.append("hors cible probable: " + ", ".join(exclusions[:5]))
-    if editorial and not (direct or entreprise or superieur):
-        score -= 25; raisons.append("contenu éditorial/actualité")
 
+    if editorial and not (direct or entreprise or superieur):
+        score -= 20
+        raisons.append("contenu éditorial/actualité")
+
+    # Année recherchée.
     if annee and annee in annees:
-        score += 3; raisons.append(f"année {annee} détectée")
+        score += 3
+        raisons.append(f"année {annee} détectée")
+
     est_2027 = str(ANNEE_PRIORITAIRE) in annees
     if est_2027:
-        score += BONUS_2027; raisons.append("2027 prioritaire")
+        score += BONUS_2027
+        raisons.append("2027 prioritaire")
     elif "2028" in annees:
         score += 6
+        raisons.append("2028 future")
     elif "2026" in annees:
         score += 2
 
+    # Date d'événement passée : beaucoup plus fiable qu'une simple année
+    # trouvée dans le texte.
     evenement_passe = bool(date_evenement and date_evenement.date() < datetime.now().date())
     if evenement_passe:
-        score -= MALUS_HORS_PERIODE; raisons.append(f"événement passé : {date_evenement:%d/%m/%Y}")
+        score -= MALUS_HORS_PERIODE
+        raisons.append(f"événement passé : {date_evenement:%d/%m/%Y}")
+
+    # Anciennes éditions dans une page sans année actuelle/future.
     annees_passees = extraire_annees_passees(texte)
     date_pub = date_publication_dt(resultat.get("date_publication", ""))
-    hors_periode = (not annees and not date_evenement and
-                    (bool(annees_passees) or (date_pub is not None and date_pub < DATE_PUBLICATION_MIN)))
+    hors_periode = (
+        not annees
+        and not date_evenement
+        and (
+            bool(annees_passees)
+            or (date_pub is not None and date_pub < DATE_PUBLICATION_MIN)
+        )
+    )
     if hors_periode:
         score -= MALUS_HORS_PERIODE
         origine = ", ".join(annees_passees[:3]) if annees_passees else f"publication {date_pub:%d/%m/%Y}"
         raisons.append(f"hors période : {origine}")
 
+    # Contexte Apec, sans laisser « université » seul décider.
     signaux_contexte = contient_terme(texte, CONTEXTE_APEC)
     if signaux_contexte:
-        score += min(4, 2 * len(signaux_contexte))
+        score += min(6, 2 * len(signaux_contexte))
         raisons.append("contexte qualifié: " + ", ".join(signaux_contexte[:4]))
 
+    # V9.7 : priorité 2027.
     if est_2027 and evenement:
         priorite_2027 = "FORTE" if date_evenement or preuve_event else "MOYENNE"
     elif "2027" in annees:
@@ -1972,74 +2099,92 @@ def calculer_score(resultat):
     else:
         priorite_2027 = "FAIBLE"
 
-    # V25 : garde-fous indépendants du score.
-    exclusion_forte = bool(exclusions or public_lycee or blocages)
+    exclusion_forte = bool(exclusions)
+
     if hors_periode or evenement_passe:
         statut = "Non pertinent"
     elif not evenement or not geo_ok or hors_geo:
+        # Filet de sécurité : un cas incomplet reste À vérifier si le score
+        # est suffisamment haut, au lieu d'être silencieusement supprimé.
         statut = "À vérifier" if score >= 8 and not exclusion_forte else "Non pertinent"
-    elif exclusion_forte:
+    elif exclusion_forte and score < 32:
         statut = "Non pertinent"
-    elif preuve_cible == "FORTE" and niveau_preuve >= 3 and score >= SEUIL_AUTO_PERTINENT:
+    elif score >= SEUIL_AUTO_PERTINENT:
         statut = "Pertinent"
-    elif preuve_cible in {"FORTE", "MOYENNE"} and niveau_preuve >= 2:
-        statut = "À vérifier"
     elif score >= 8:
         statut = "À vérifier"
     else:
         statut = "Non pertinent"
 
-    if statut == "Pertinent" and event_indirect and not (event_emploi or event_superieur) and niveau_source not in (1, 2):
+    # Un format indirect sans source fiable ne devient jamais « Pertinent »
+    # uniquement à cause du score.
+    if (
+        statut == "Pertinent"
+        and event_indirect
+        and not (event_emploi or event_superieur)
+        and niveau_source not in (1, 2)
+    ):
         statut = "À vérifier"
         raisons.append("format indirect : vérification nécessaire")
 
-    raison = {
-        "Pertinent": "Cible Apec + événement + preuve de public qualifié suffisamment démontrés",
-        "À vérifier": "Signal utile mais preuve de cible ou de contexte encore incomplète",
-        "Non pertinent": "Événement, cible, période ou public hors périmètre",
-    }[statut]
-
-    type_evenement = (
-        "RECRUTEMENT" if event_emploi and entreprise else
-        "CAREER" if "career" in texte or "carrière" in texte else
-        "FORMATIONS_SUPERIEURES" if event_superieur else
-        "FORUM_ENTREPRISES" if "forum entreprise" in texte or "rencontre entreprises" in texte else
-        "JOB_DATING" if "job dating" in texte else
-        "SALON_EMPLOI" if "salon emploi" in texte else
-        "SALON_ETUDIANT" if "salon étudiant" in texte else
-        "ARTICLE_EDITORIAL" if editorial else "EVENEMENT_INDETERMINE"
+    preuves_v26 = construire_preuves_v26(
+        texte, titre, direct, qualifie, entreprise, superieur, exclusions,
+        evenement, preuve_event, niveau_source, date_evenement, geo_ok, hors_geo, editorial
     )
 
+    # Règle V26 : un score élevé ne suffit plus. Une cible Apec non démontrée
+    # ne peut jamais être classée automatiquement Pertinent.
+    if statut == "Pertinent" and (preuves_v26["preuve_cible"] == "ABSENTE" or preuves_v26["niveau_preuve"] < 3):
+        statut = "À vérifier"
+        raisons.append("V26 : preuve de cible insuffisante")
+    if statut == "Pertinent" and preuves_v26["motif_exclusion_v25"]:
+        statut = "À vérifier"
+        raisons.append("V26 : contradiction de cible à vérifier")
+
+    raison = {
+        "Pertinent": "Cible Apec + événement + période suffisamment démontrés",
+        "À vérifier": "Signal utile mais preuve ou ciblage à confirmer",
+        "Non pertinent": "Événement/cible/période hors périmètre",
+    }[statut]
+
     return {
-        "score": score, "score_cible_apec": score,
+        "score": score,
+        "score_cible_apec": score,
+        **preuves_v26,
         "score_emploi": 10 if event_emploi else 0,
         "score_formation": 3 if _signaux(texte, TERMES_FORMATION) else 0,
-        "score_superieur": min(8, 2 * len(superieur)),
-        "score_apec": min(18, 6 * len(direct)),
-        "score_entreprise": min(12, 3 * len(entreprise)),
-        "score_qualifie": min(12, 3 * len(qualifie)),
+        "score_superieur": min(10, 3 * len(superieur)),
+        "score_apec": min(24, 8 * len(direct)),
+        "score_entreprise": min(16, 4 * len(entreprise)),
+        "score_qualifie": min(16, 4 * len(qualifie)),
         "score_geographie": 5 if geo_ok else -12,
         "score_date": 4 if date_evenement else 0,
-        "score_bruit": -25 if editorial else 0, "score_complementaire": 0,
+        "score_bruit": -20 if editorial else 0,
+        "score_complementaire": 0,
         "bonus_titre": 4 if event_dans_titre else 0,
         "signaux_cible_apec": ", ".join(direct),
         "signaux_superieur": ", ".join(superieur + qualifie[:5]),
         "signaux_entreprise": ", ".join(entreprise),
         "signaux_exclusion": ", ".join(exclusions),
-        "statut": statut, "raison": raison,
-        "motif": "Événement passé" if evenement_passe else motif_exclusion,
+        "statut": statut,
+        "raison": raison,
+        "motif": "Événement passé" if evenement_passe else "",
         "hors_periode": "OUI" if hors_periode or evenement_passe else "NON",
-        "periode": "2027 (prioritaire)" if est_2027 else "2028" if "2028" in annees else "2026" if "2026" in annees else "Année non détectée",
+        "periode": (
+            "2027 (prioritaire)" if est_2027
+            else "2028" if "2028" in annees
+            else "2026" if "2026" in annees
+            else "Année non détectée"
+        ),
         "details_score": " | ".join(raisons),
         "evenement_detecte": "OUI" if evenement else "NON",
         "preuve_evenement": "OUI" if preuve_event or event_dans_titre else "NON",
         "geographie_verifiee": "OUI" if geo_ok else "NON",
         "annee_detectee": ", ".join(annees),
-        "hors_perimetre": ", ".join(exclusions), "hors_geographie": ", ".join(hors_geo),
-        "niveau_source_v9": niveau_source, "priorite_2027": priorite_2027,
-        "preuve_cible": preuve_cible, "public_cible": public_cible,
-        "niveau_preuve": niveau_preuve, "motif_exclusion_v25": motif_exclusion,
-        "type_evenement_v25": type_evenement,
+        "hors_perimetre": ", ".join(exclusions),
+        "hors_geographie": ", ".join(hors_geo),
+        "niveau_source_v9": niveau_source,
+        "priorite_2027": priorite_2027,
     }
 
 
@@ -2063,7 +2208,7 @@ def traiter(resultats, memoire_globale=None):
         "motif", "details_score", "evenement_detecte", "preuve_evenement",
         "geographie_verifiee", "annee_detectee", "hors_periode",
         "hors_perimetre", "hors_geographie", "niveau_source_v9",
-        "priorite_2027", "periode", "preuve_cible", "public_cible", "niveau_preuve", "motif_exclusion_v25", "type_evenement_v25",
+        "priorite_2027", "periode", "preuve_cible", "public_cible", "type_evenement_v25", "niveau_preuve", "motif_exclusion_v25", "preuve_cible_v26", "preuve_evenement_v26", "contradiction_cible_v26",
     ]
 
     for resultat in resultats:
@@ -2390,28 +2535,27 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
 
         if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE":
             arbitrage = str(analyse38.get("arbitrage_38", "AUCUN")).upper()
-            resultat["arbitrage_38"] = arbitrage
-            resultat["confiance_ia_2"] = analyse38.get("confiance_ia_2", resultat.get("confiance_ia_1", 0))
+            confiance38 = int(analyse38.get("confiance_ia_2", 0) or 0)
+            decision31 = resultat.get("decision_ia_1", resultat.get("decision_ia", "A_VERIFIER"))
+            decision_finale = decision31
+            if arbitrage == "RETROGRADER":
+                decision_finale = "A_VERIFIER"
+            elif arbitrage == "REJETER" and confiance38 >= 80:
+                decision_finale = "NON_PERTINENT"
+            elif arbitrage in {"CONFIRMER", "AUCUN"}:
+                decision_finale = decision31
+            resultat["decision_ia_38"] = arbitrage
+            resultat["confiance_ia_38"] = confiance38
+            resultat["raison_ia_38"] = analyse38.get("raison_ia_2", "")
+            resultat["modele_ia_38"] = analyse38.get("modele_ia_2", "gemini-3.8-flash")
+            resultat["decision_ia"] = decision_finale
+            resultat["confiance_ia"] = min(int(resultat.get("confiance_ia_1", 0) or 0), confiance38) if arbitrage in {"RETROGRADER", "REJETER"} else int(resultat.get("confiance_ia_1", 0) or 0)
             resultat["raison_ia"] = (
                 str(resultat.get("raison_ia_1", ""))
-                + " | CONTRÔLE 3.8 : "
+                + " | ARBITRAGE 3.8 [" + arbitrage + "]: "
                 + str(analyse38.get("raison_ia_2", ""))
             ).strip(" |")
-            resultat["enrichissement_38"] = analyse38.get("enrichissement_38", "")
             resultat["modele_ia"] = "gemini-3.1-flash-lite + gemini-3.8-flash"
-
-            # 3.8 contrôle 3.1 ; il ne peut pas promouvoir un candidat faible.
-            d31 = str(resultat.get("decision_ia_1", "A_VERIFIER"))
-            c31 = int(resultat.get("confiance_ia_1", 0) or 0)
-            if arbitrage == "REJETER" and int(analyse38.get("confiance_ia_2", 0) or 0) >= 80:
-                resultat["decision_ia"] = "NON_PERTINENT"
-                resultat["confiance_ia"] = max(c31, int(analyse38.get("confiance_ia_2", 0) or 0))
-            elif arbitrage == "RETROGRADER":
-                resultat["decision_ia"] = "A_VERIFIER"
-                resultat["confiance_ia"] = min(c31, int(analyse38.get("confiance_ia_2", c31) or c31))
-            else:
-                resultat["decision_ia"] = d31
-                resultat["confiance_ia"] = c31
             classer_statut_final(resultat, resultat["decision_ia"])
         else:
             resultat["modele_ia"] = "gemini-3.1-flash-lite"
@@ -2453,27 +2597,6 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinents / "
         f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier"
     )
-
-    # Diagnostic exploitable pour auditer les faux positifs/faux négatifs.
-    try:
-        diagnostic_fields = [
-            "url", "titre", "departement", "annee_detectee", "score", "statut",
-            "preuve_cible", "public_cible", "niveau_preuve", "type_evenement_v25",
-            "motif_exclusion_v25", "signaux_cible_apec", "signaux_entreprise",
-            "signaux_exclusion", "details_score", "decision_ia_1",
-            "confiance_ia_1", "raison_ia_1", "arbitrage_38", "confiance_ia_2",
-            "raison_ia_2", "enrichissement_38", "decision_ia", "confiance_ia",
-            "raison_ia", "statut_final",
-        ]
-        import csv
-        with open(DATA / "diagnostic_scoring.csv", "w", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=diagnostic_fields, extrasaction="ignore")
-            w.writeheader()
-            for r in ia_resultats:
-                w.writerow({k: r.get(k, "") for k in diagnostic_fields})
-        print(f"🔎 Diagnostic scoring : {DATA / 'diagnostic_scoring.csv'}")
-    except Exception as e:
-        print(f"⚠️ Diagnostic scoring non écrit : {type(e).__name__} : {e}")
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
 
@@ -3664,3 +3787,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    nettoyer_output()
