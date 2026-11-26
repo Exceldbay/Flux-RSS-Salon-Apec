@@ -1,3 +1,14 @@
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    REPORTLAB_DISPONIBLE = True
+except ImportError:
+    REPORTLAB_DISPONIBLE = False
+
 from pathlib import Path
 from urllib.parse import quote_plus
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,7 +32,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from bs4 import BeautifulSoup
 
-from ia import (analyser_resultat_31, analyser_resultat_31_tour2, analyser_resultat_31_tour3, analyser_resultat_38)
+from ia import analyser_resultat_31, analyser_resultat_38
 from sources_externes import collecter_sources_externes
 from teams import construire_resume_teams, envoyer_teams, sauvegarder_payload
 
@@ -101,11 +112,7 @@ TIMEOUT = 10
 MAX_RETRIES = 2
 COOLDOWN_31_SECONDS = int(os.getenv("GEMINI_31_COOLDOWN_SECONDS", "10"))
 COOLDOWN_38_SECONDS = int(os.getenv("GEMINI_38_COOLDOWN_SECONDS", "60"))
-MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
-IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
-IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
-IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v28-3x31-plus1x38"
+MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "5"))
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -2186,177 +2193,252 @@ def classer_statut_final(resultat, decision):
 # ============================================================
 
 def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
-    """Cascade conservatrice : 3 tours Gemini 3.1, puis TOP 3 en 3.8.
+    """Cascade IA avec mémoire persistante : 3.1 uniquement pour les nouveautés.
 
-    La BDD/mémoire reste prioritaire : les candidats inchangés déjà analysés
-    ne repassent pas par Gemini. En mode test, le volume peut être limité et
-    la persistance désactivée.
+    Les événements identiques déjà enrichis lors d'une run précédente sont
+    réutilisés sans appel HTTP de page, sans appel Gemini 3.1 et sans appel
+    Gemini 3.8. Les nouveaux/modifiés passent dans la cascade normale.
     """
     memoire_ia = memoire_ia or {}
     bdd_candidats = bdd_candidats or preparer_bdd_candidats()
     tous_candidats = pertinents + a_verifier
-    candidats, non_eligibles, hors_perimetre = [], [], []
 
+    candidats = []
+    non_eligibles = []
+    hors_perimetre = []
     for candidat in tous_candidats:
         score = int(candidat.get("score", 0) or 0)
         dept = str(candidat.get("departement", "")).strip()
         erreur_geo = str(candidat.get("erreur_geographique", "")).strip()
+
         if dept and dept not in DEPARTEMENTS_CIBLES:
-            candidat.update({"erreur_geographique":"ERREUR_GEOGRAPHIQUE","decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Hors périmètre géographique : département {dept}.","ia_analyse":"NON","statut_final":"Non pertinent"})
-            hors_perimetre.append(candidat); continue
+            candidat["erreur_geographique"] = "ERREUR_GEOGRAPHIQUE"
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = f"Hors périmètre géographique : département {dept}."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = "Non pertinent"
+            hors_perimetre.append(candidat)
+            continue
+
         if erreur_geo == "ERREUR_GEOGRAPHIQUE":
-            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":"Hors périmètre géographique : exclu avant analyse IA.","ia_analyse":"NON","statut_final":"Non pertinent"})
-            hors_perimetre.append(candidat); continue
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = "Hors périmètre géographique : exclu avant analyse IA."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = "Non pertinent"
+            hors_perimetre.append(candidat)
+            continue
+
         if score < 0:
-            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Score négatif : {score}. Exclu du filtrage IA.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
-            non_eligibles.append(candidat); continue
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = f"Score négatif : {score}. Exclu du filtrage IA."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = candidat.get("statut", "À vérifier")
+            non_eligibles.append(candidat)
+            continue
+
         if score >= GEMINI_SCORE_MIN:
             candidats.append(candidat)
         else:
-            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
+            candidat["decision_ia"] = "IA_NON_REQUISE"
+            candidat["confiance_ia"] = 0
+            candidat["raison_ia"] = f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}."
+            candidat["ia_analyse"] = "NON"
+            candidat["statut_final"] = candidat.get("statut", "À vérifier")
             non_eligibles.append(candidat)
 
     candidats.sort(key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
-    nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
-    a_analyser_bdd = nouveaux_bdd + modifies_bdd
+
+    # 0) BDD persistante : les candidats déjà analysés et inchangés sont
+    # restaurés directement et ne repassent pas dans les recherches/IA.
+    candidats_nouveaux_bdd, candidats_modifies_bdd, candidats_reutilises_bdd = classifier_candidats_bdd(
+        candidats, bdd_candidats
+    )
+    candidats_bdd_a_analyser = candidats_nouveaux_bdd + candidats_modifies_bdd
+
+    # 1) Mémoire globale : seuls les nouveaux/modifiés/à rafraîchir passent
+    # dans les trois recherches lourdes.
     memoire_globale = charger_memoire_globale()
-    a_verifier_memoire, _ = appliquer_memoire_globale(a_analyser_bdd, memoire_globale)
-    a_traiter, memorises = appliquer_memoire_ia(a_verifier_memoire, memoire_ia)
-    enrichir_candidats_ia(a_traiter)
-    for c in a_traiter:
-        try: c.update(calculer_score(c))
-        except Exception: pass
+    candidats_a_verifier, _ = appliquer_memoire_globale(candidats_bdd_a_analyser, memoire_globale)
+    # 2) Mémoire IA détaillée : réutilisation des enrichissements déjà connus.
+    candidats_a_traiter, candidats_memorises = appliquer_memoire_ia(candidats_a_verifier, memoire_ia)
+    enrichir_candidats_ia(candidats_a_traiter)
+    for candidat in candidats_a_traiter:
+        try:
+            candidat.update(calculer_score(candidat))
+        except Exception:
+            pass
 
-    if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
-        a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
-
-    ia_resultats = list(reutilises_bdd) + list(memorises)
+    # Les candidats déjà analysés par la BDD sont déjà des résultats finaux.
+    ia_resultats = list(candidats_reutilises_bdd) + list(candidats_memorises)
     quota_bloque = False
     erreurs_consecutives = 0
-    appels_31 = appels_38 = 0
+    appels_31 = 0
+    appels_38 = 0
 
-    print("\n========================================")
-    print("IA V28 — 3 TOURS 3.1 + TOP 3 EN 3.8")
+    print()
     print("========================================")
-    print(f"Règles : {IA_RULES_VERSION}")
-    print(f"Candidats filtrés : {len(candidats)}")
-    print(f"BDD : {len(reutilises_bdd)} réutilisés / {len(nouveaux_bdd)} nouveaux / {len(modifies_bdd)} modifiés")
-    print(f"Mémoire IA : {len(memorises)} réutilisés")
-    print(f"À analyser : {len(a_traiter)}" + (f" | MODE TEST, max {IA_TEST_MAX_CANDIDATS}" if IA_TEST_MODE else ""))
-    print(f"3.1 : 3 tours, cooldown {COOLDOWN_31_SECONDS}s | 3.8 : TOP {MAX_IA_38}, cooldown {COOLDOWN_38_SECONDS}s")
+    print("COUCHE IA GEMINI — CASCADE 3.1 → 3.8 + MÉMOIRE")
+    print("========================================")
+    print(f"Premier filtre Python : score >= {GEMINI_SCORE_MIN}")
+    print(f"Candidats après filtre : {len(candidats)}")
+    print(f"BDD : {len(candidats_reutilises_bdd)} déjà analysés / {len(candidats_nouveaux_bdd)} nouveaux / {len(candidats_modifies_bdd)} modifiés")
+    print(f"Réutilisés depuis mémoire IA : {len(candidats_memorises)}")
+    print(f"Nouveaux/modifiés à analyser : {len(candidats_a_traiter)}")
+    print("Gemini 3.1 Flash Lite : nouveaux/modifiés uniquement | cooldown 10 s")
+    print(f"Gemini 3.8 Flash : TOP {MAX_IA_38} nouveaux/modifiés | cooldown 60 s")
+    print(flush=True)
 
-    def appel_avec_cooldown(fn, args, cooldown, dernier):
-        if dernier:
-            attente = cooldown - (time.time() - dernier)
-            if attente > 0: time.sleep(attente)
-        resultat = fn(*args)
-        return resultat, time.time()
+    dernier_appel_31 = 0.0
+    for position, resultat in enumerate(candidats_a_traiter, 1):
+        if dernier_appel_31:
+            attente = COOLDOWN_31_SECONDS - (time.time() - dernier_appel_31)
+            if attente > 0:
+                time.sleep(attente)
 
-    # PHASE 1 — 3.1 TOUR 1
-    t1_ok = []
-    dernier = 0.0
-    for i, r in enumerate(a_traiter, 1):
-        print(f"[PHASE 1/4 — 3.1 T1] {i}/{len(a_traiter)} — {court(r.get('titre',''))}", flush=True)
-        analyse, dernier = appel_avec_cooldown(analyser_resultat_31, (r,), COOLDOWN_31_SECONDS, dernier)
+        print(f"[IA 3.1] {position}/{len(candidats_a_traiter)} — score {resultat.get('score', 0)} — {court(resultat.get('titre', ''))}", flush=True)
+        analyse = analyser_resultat_31(resultat)
+        dernier_appel_31 = time.time()
         appels_31 += 1
-        r.update(analyse)
-        r["ia_analyse"] = "OUI"; r["memoire_ia"] = "NON"
-        r["decision_ia_1"] = analyse.get("decision_ia_1", "IA_INDISPONIBLE")
-        r["confiance_ia_1"] = analyse.get("confiance_ia_1", 0)
-        r["raison_ia_1"] = analyse.get("raison_ia_1", "")
-        if r["decision_ia_1"] == "IA_INDISPONIBLE":
+
+        resultat.update(analyse)
+        resultat["ia_analyse"] = "OUI"
+        resultat["memoire_ia"] = "NON"
+        resultat["modele_ia_1"] = "gemini-3.1-flash-lite"
+        resultat["decision_ia_1"] = analyse.get("decision_ia", "IA_INDISPONIBLE")
+        resultat["confiance_ia_1"] = analyse.get("confiance_ia", 0)
+        resultat["raison_ia_1"] = analyse.get("raison_ia", "")
+        resultat["escalade_38"] = "NON"
+
+        decision = str(analyse.get("decision_ia", "IA_INDISPONIBLE"))
+        resultat["date_ia"] = normaliser_date_ia(resultat.get("date_ia", ""))
+
+        dept_python = str(resultat.get("departement", "")).strip()
+        dept_ia = str(resultat.get("departement_ia", "")).strip()
+        if dept_python and dept_ia and dept_ia != dept_python:
+            resultat["raison_ia"] = (str(resultat.get("raison_ia", "")) + " | Conflit de département avec Python : vérification requise.").strip(" |")
+            resultat["decision_ia"] = "A_VERIFIER"
+            decision = "A_VERIFIER"
+        if dept_ia and dept_ia not in DEPARTEMENTS_CIBLES:
+            resultat["decision_ia"] = "A_VERIFIER"
+            decision = "A_VERIFIER"
+
+        if decision == "IA_INDISPONIBLE":
             erreurs_consecutives += 1
         else:
             erreurs_consecutives = 0
+
         if erreurs_consecutives >= MAX_ERREURS_IA_CONSECUTIVES:
-            quota_bloque = True; break
-        t1_ok.append(r)
+            quota_bloque = True
+            print(f"⛔ Arrêt 3.1 après {erreurs_consecutives} erreurs consécutives", flush=True)
+            for restant in candidats_a_traiter[position:]:
+                restant["decision_ia"] = "IA_NON_ANALYSE"
+                restant["confiance_ia"] = 0
+                restant["raison_ia"] = "Analyse 3.1 interrompue après erreurs Gemini consécutives."
+                restant["ia_analyse"] = "NON"
+                restant["statut_final"] = restant.get("statut", "À vérifier")
+                ia_resultats.append(restant)
+            break
 
-    # PHASE 2 — 3.1 TOUR 2 : contre-analyse
-    t2_ok = []
-    dernier = 0.0
-    for i, r in enumerate(t1_ok, 1):
-        print(f"[PHASE 2/4 — 3.1 T2] {i}/{len(t1_ok)} — {court(r.get('titre',''))}", flush=True)
-        t1 = {k:v for k,v in r.items() if k.endswith('_31') or k in {"decision_ia_1","confiance_ia_1","raison_ia_1","preuves_31","public_cible_31","type_evenement_31"}}
-        analyse, dernier = appel_avec_cooldown(analyser_resultat_31_tour2, (r, t1), COOLDOWN_31_SECONDS, dernier)
-        appels_31 += 1; r.update(analyse)
-        if analyse.get("decision_ia_31_t2") == "IA_INDISPONIBLE":
-            r["raison_ia_31_t2"] = "Tour 2 indisponible : Tour 1 conservé."
-        t2_ok.append(r)
+        classer_statut_final(resultat, decision)
+        ia_resultats.append(resultat)
 
-    # PHASE 3 — 3.1 TOUR 3 : tranche
-    t3_ok = []
-    dernier = 0.0
-    for i, r in enumerate(t2_ok, 1):
-        print(f"[PHASE 3/4 — 3.1 T3] {i}/{len(t2_ok)} — {court(r.get('titre',''))}", flush=True)
-        t1 = {k:v for k,v in r.items() if k.endswith('_31') or k in {"decision_ia_1","confiance_ia_1","raison_ia_1","preuves_31","public_cible_31"}}
-        t2 = {k:v for k,v in r.items() if '31_t2' in k}
-        analyse, dernier = appel_avec_cooldown(analyser_resultat_31_tour3, (r, t1, t2), COOLDOWN_31_SECONDS, dernier)
-        appels_31 += 1; r.update(analyse)
-        decision = analyse.get("decision_ia_31_t3", "A_VERIFIER")
-        if decision == "IA_INDISPONIBLE":
-            decision = r.get("decision_ia_1", "A_VERIFIER")
-            r["raison_ia_31_t3"] = "Tour 3 indisponible : décision Tour 1 conservée."
-        r["decision_ia"] = decision
-        r["confiance_ia"] = analyse.get("confiance_ia_31_t3", r.get("confiance_ia_1", 0))
-        r["raison_ia"] = analyse.get("raison_ia_31_t3", r.get("raison_ia_1", ""))
-        r["modele_ia"] = MODEL_31 if 'MODEL_31' in globals() else "gemini-3.1-flash-lite"
-        r["analyse_humaine"] = r.get("raison_ia_31_t3", "")
-        classer_statut_final(r, r["decision_ia"])
-        t3_ok.append(r)
+    candidats_38 = [
+        r for r in ia_resultats
+        if r.get("decision_ia_1") in {"PERTINENT", "A_VERIFIER"}
+        and r.get("ia_analyse") == "OUI"
+        and r.get("memoire_ia") != "OUI"
+    ]
 
-    # Sélection intelligente : pertinence + incertitude + désaccord, pas score Python seul.
-    def priorite_38(r):
-        d1 = r.get("decision_ia_1", ""); d2 = r.get("decision_ia_31_t2", ""); d3 = r.get("decision_ia_31_t3", r.get("decision_ia", ""))
-        c3 = int(r.get("confiance_ia_31_t3", 0) or 0)
-        py = int(r.get("score", 0) or 0)
-        conflit = 35 if len({d1,d2,d3}) > 1 else (15 if d1 != d3 or d2 != d3 else 0)
-        incert = max(0, 100-c3)
-        fort = 20 if d3 == "PERTINENT" else (12 if d3 == "A_VERIFIER" else 0)
-        p2027 = 15 if "FORTE" in str(r.get("priorite_2027", "")).upper() else 0
-        return (conflit + incert + fort + p2027, py, c3)
+    def score_importance_38(r):
+        decision = r.get("decision_ia_1", "")
+        rang = {"PERTINENT": 3, "A_VERIFIER": 2}.get(decision, 0)
+        confiance = int(r.get("confiance_ia_1", 0) or 0)
+        score_python = int(r.get("score", 0) or 0)
+        priorite = str(r.get("priorite_2027", "")).upper()
+        bonus = 20 if "FORTE" in priorite else (10 if "MOYENNE" in priorite else 0)
+        direct = 10 if r.get("score_cible_apec", 0) >= 20 else 0
+        return (rang, confiance, score_python + bonus + direct)
 
-    top_38 = sorted([r for r in t3_ok if r.get("ia_analyse") == "OUI"], key=priorite_38, reverse=True)[:MAX_IA_38]
+    candidats_38.sort(key=score_importance_38, reverse=True)
+    top_38 = candidats_38[:MAX_IA_38]
 
-    # PHASE 4 — 3.8 : expertise senior sur TOP 3
-    dernier = 0.0
-    for i, r in enumerate(top_38, 1):
-        print(f"[PHASE 4/4 — 3.8] {i}/{len(top_38)} — {court(r.get('titre',''))}", flush=True)
-        analyse38, dernier = appel_avec_cooldown(analyser_resultat_38, (r, r), COOLDOWN_38_SECONDS, dernier)
-        appels_38 += 1; r.update(analyse38); r["escalade_38"] = "OUI"; r["motif_escalade_38"] = "Top candidat après 3 tours Gemini 3.1"
-        if analyse38.get("decision_ia_38") != "IA_INDISPONIBLE":
-            r["decision_ia"] = analyse38.get("decision_ia_38", r.get("decision_ia"))
-            r["confiance_ia"] = analyse38.get("confiance_ia_38", r.get("confiance_ia", 0))
-            r["raison_ia"] = analyse38.get("raison_ia_38", r.get("raison_ia", ""))
-            r["analyse_humaine"] = analyse38.get("analyse_humaine_38", r.get("analyse_humaine", ""))
-            r["action_recommandee"] = analyse38.get("action_recommandee_38", r.get("action_recommandee_31_t3", ""))
-            r["modele_ia"] = "gemini-3.1-flash-lite ×3 + gemini-3.8-flash"
-            classer_statut_final(r, r["decision_ia"])
+    print()
+    print("========================================")
+    print("RÉ-ENRICHISSEMENT GEMINI 3.8")
+    print("========================================")
+    print(f"Candidats 3.1 nouveaux disponibles : {len(candidats_38)}")
+    print(f"Top 3.8 sélectionné : {len(top_38)}/{MAX_IA_38}")
+    print(flush=True)
+
+    dernier_appel_38 = 0.0
+    for position, resultat in enumerate(top_38, 1):
+        if dernier_appel_38:
+            attente = COOLDOWN_38_SECONDS - (time.time() - dernier_appel_38)
+            if attente > 0:
+                print(f"[IA 3.8] cooldown : {attente:.0f}s", flush=True)
+                time.sleep(attente)
+
+        print(f"[IA 3.8] {position}/{len(top_38)} — ré-enrichissement — {court(resultat.get('titre', ''))}", flush=True)
+        analyse38 = analyser_resultat_38(resultat, resultat)
+        dernier_appel_38 = time.time()
+        appels_38 += 1
+        resultat.update(analyse38)
+        resultat["escalade_38"] = "OUI"
+        resultat["motif_escalade_38"] = "Top candidat après analyse Gemini 3.1"
+
+        if analyse38.get("decision_ia_2") != "IA_INDISPONIBLE":
+            resultat["decision_ia"] = analyse38.get("decision_ia_2", resultat.get("decision_ia_1", "A_VERIFIER"))
+            resultat["confiance_ia"] = analyse38.get("confiance_ia_2", resultat.get("confiance_ia_1", 0))
+            resultat["raison_ia"] = (
+                str(resultat.get("raison_ia_1", ""))
+                + " | ENRICHISSEMENT 3.8 : "
+                + str(analyse38.get("raison_ia_2", ""))
+            ).strip(" |")
+            resultat["modele_ia"] = "gemini-3.1-flash-lite + gemini-3.8-flash"
+            classer_statut_final(resultat, resultat["decision_ia"])
         else:
-            r["escalade_38"] = "ECHEC"; r["raison_ia"] = str(r.get("raison_ia", "")) + " | 3.8 indisponible, décision 3.1 T3 conservée."
+            resultat["modele_ia"] = "gemini-3.1-flash-lite"
+            resultat["raison_ia"] = str(resultat.get("raison_ia_1", "")) + " | 3.8 indisponible, analyse 3.1 conservée."
 
-    ia_resultats.extend(t3_ok)
-    ia_resultats.extend(non_eligibles)
+    for resultat in non_eligibles:
+        ia_resultats.append(resultat)
+
+    nouveaux_pertinents = [r for r in ia_resultats if r.get("decision_ia") == "PERTINENT"]
+    nouveaux_a_verifier = [r for r in ia_resultats if r.get("decision_ia") == "A_VERIFIER"]
+    nouveaux_pertinents.sort(key=lambda x: x.get("confiance_ia", 0), reverse=True)
+    nouveaux_a_verifier.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Les décisions mémorisées n'ont pas besoin d'être recalculées par Gemini.
     for r in ia_resultats:
         if r.get("memoire_ia") == "OUI":
             r["decision_ia"] = r.get("decision_ia") or r.get("decision_ia_1", "A_VERIFIER")
-            classer_statut_final(r, r["decision_ia"])
+            r["modele_ia"] = r.get("modele_ia") or r.get("modele_ia_1", "MEMOIRE")
+            classer_statut_final(r, r.get("decision_ia", "A_VERIFIER"))
 
-    nouveaux_pertinents = sorted([r for r in ia_resultats if r.get("decision_ia") == "PERTINENT"], key=lambda x:x.get("confiance_ia",0), reverse=True)
-    nouveaux_a_verifier = sorted([r for r in ia_resultats if r.get("decision_ia") == "A_VERIFIER"], key=lambda x:x.get("score",0), reverse=True)
-
-    print(f"\nAnalyses Gemini 3.1 : {appels_31} ({len(t3_ok)} candidats × 3 si complet)")
-    print(f"Gemini 3.8 : {appels_38}/{MAX_IA_38}")
-    print(f"Top 3 sélectionné : {len(top_38)}")
-    print(f"Réutilisations BDD : {len(reutilises_bdd)} | mémoire IA : {len(memorises)}")
+    print()
+    print(f"Analyses Gemini 3.1 effectuées cette run : {appels_31}")
+    print(f"Enrichissements Gemini 3.8 effectués cette run : {appels_38}/{MAX_IA_38}")
+    print(f"Réutilisations mémoire BDD : {len(candidats_reutilises_bdd)}")
+    print(f"Réutilisations mémoire IA : {len(candidats_memorises)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
 
-    if not (IA_TEST_MODE and IA_TEST_NO_PERSIST):
-        a_persister = [r for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("ia_analyse") == "OUI"]
-        if a_persister:
-            enregistrer_candidats_bdd(a_persister, bdd_candidats)
-    else:
-        print("🧪 MODE TEST : aucune persistance BDD pour cette phase.")
+    # Persistance : uniquement les candidats effectivement analysés cette run.
+    # Les candidats interrompus par une erreur restent donc retraitables.
+    a_persister = [
+        r for r in ia_resultats
+        if r.get("bdd_reutilise") is not True
+        and (r.get("ia_analyse") == "OUI" or r.get("memoire_ia") == "OUI")
+    ]
+    if a_persister:
+        enregistrer_candidats_bdd(a_persister, bdd_candidats)
+    print(
+        "Décisions finales : "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'PERTINENT')} pertinents / "
+        f"{sum(1 for x in ia_resultats if x.get('decision_ia') == 'A_VERIFIER')} à vérifier"
+    )
 
     return nouveaux_pertinents, nouveaux_a_verifier, ia_resultats
 
@@ -3261,6 +3343,176 @@ def importer_historique_runs_dans_bdd(bdd):
     }
 
 
+
+
+def generer_rapport_pdf_unique(
+    delta=None,
+    stats_operateurs=None,
+    pertinents=None,
+    a_verifier=None,
+    non_pertinents=None,
+    ia_resultats=None,
+    resultats_bruts=None,
+    externes=None,
+    erreurs=None,
+    duree_total=0,
+    appels_31=0,
+    appels_38=0,
+    sauvegarde_ok=False,
+    synchronisation_ok=False,
+):
+    """Crée EXACTEMENT UN PDF par exécution dans output/.
+
+    Aucun dossier run_... et aucun PDF intermédiaire n'est créé.
+    Le fichier est remplacé s'il existe déjà pour la même exécution.
+    """
+    if not REPORTLAB_DISPONIBLE:
+        print("⚠️ ReportLab absent : rapport PDF non généré.")
+        return None
+
+    OUTPUT.mkdir(exist_ok=True)
+
+    # Un seul nom de rapport pour l'exécution.
+    horodatage = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    pdf_path = OUTPUT / f"rapport_veille_{horodatage}.pdf"
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="RapportTitle", parent=styles["Title"],
+        alignment=TA_CENTER, fontSize=19, leading=23, spaceAfter=8
+    ))
+    styles.add(ParagraphStyle(
+        name="RapportSub", parent=styles["Normal"],
+        alignment=TA_CENTER, fontSize=9, textColor=colors.grey, spaceAfter=14
+    ))
+    styles.add(ParagraphStyle(
+        name="RapportSection", parent=styles["Heading2"],
+        fontSize=13, leading=16, spaceBefore=10, spaceAfter=6
+    ))
+    styles.add(ParagraphStyle(
+        name="RapportSmall", parent=styles["Normal"],
+        fontSize=8.2, leading=10.5
+    ))
+
+    def valeur(obj, cle, defaut="—"):
+        if isinstance(obj, dict):
+            v = obj.get(cle, defaut)
+            return defaut if v in (None, "") else str(v)
+        return defaut
+
+    def nb(x):
+        try:
+            return len(x)
+        except Exception:
+            return 0
+
+    # Les erreurs peuvent être un entier ou une liste selon le pipeline.
+    erreurs_nb = len(erreurs) if isinstance(erreurs, (list, tuple, dict, set)) else (erreurs or 0)
+
+    story = [
+        Paragraph("RAPPORT DE VEILLE APEC", styles["RapportTitle"]),
+        Paragraph(
+            f"Exécution du {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')} — document unique",
+            styles["RapportSub"]
+        ),
+        Paragraph("1. Synthèse", styles["RapportSection"]),
+    ]
+
+    resume = [
+        ["Indicateur", "Résultat"],
+        ["Candidats collectés", str(nb(resultats_bruts))],
+        ["Sources externes", str(nb(externes))],
+        ["Pertinents", str(nb(pertinents))],
+        ["À vérifier", str(nb(a_verifier))],
+        ["Non pertinents", str(nb(non_pertinents))],
+        ["Résultats IA", str(nb(ia_resultats))],
+        ["Appels Gemini 3.1", str(appels_31)],
+        ["Appels Gemini 3.8", str(appels_38)],
+        ["Erreurs", str(erreurs_nb)],
+        ["Durée totale", f"{float(duree_total):.1f} s"],
+        ["Sauvegarde", "OUI" if sauvegarde_ok else "NON"],
+        ["Synchronisation Excel", "OUI" if synchronisation_ok else "NON"],
+    ]
+    t = Table(resume, colWidths=[75*mm, 100*mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.4, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 8.5),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(t)
+
+    story.append(Paragraph("2. Résultats prioritaires", styles["RapportSection"]))
+    lignes = [["Candidat", "Statut", "Score", "Raison / preuve"]]
+    tous = list(pertinents or []) + list(a_verifier or [])
+    for c in tous[:50]:
+        lignes.append([
+            valeur(c, "titre", valeur(c, "title", "Sans titre"))[:70],
+            valeur(c, "statut"),
+            valeur(c, "score"),
+            valeur(c, "raison", valeur(c, "motif", ""))[:100],
+        ])
+    if len(lignes) == 1:
+        lignes.append(["Aucun candidat", "—", "—", "Aucun résultat prioritaire"])
+    t = Table(lignes, colWidths=[55*mm, 30*mm, 18*mm, 72*mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 7.5),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(t)
+
+    story.append(Paragraph("3. Analyse IA et arbitrage", styles["RapportSection"]))
+    story.append(Paragraph(
+        "Le rapport conserve les décisions IA disponibles à la fin de l'exécution. "
+        "Les trois tours Gemini 3.1 et la sélection Gemini 3.8 sont regroupés dans "
+        "ce même document, sans génération de rapports PDF séparés.",
+        styles["RapportSmall"]
+    ))
+
+    ia_lignes = [["Candidat", "Décision", "Confiance", "Analyse / action"]]
+    for c in list(ia_resultats or [])[:50]:
+        analyse = valeur(c, "analyse_humaine", valeur(c, "raison", ""))[:140]
+        ia_lignes.append([
+            valeur(c, "titre", valeur(c, "title", "Sans titre"))[:55],
+            valeur(c, "statut", valeur(c, "decision", "—")),
+            valeur(c, "confiance", valeur(c, "confiance_31", "—")),
+            analyse,
+        ])
+    if len(ia_lignes) == 1:
+        ia_lignes.append(["Aucun résultat IA", "—", "—", "—"])
+    t = Table(ia_lignes, colWidths=[50*mm, 32*mm, 23*mm, 70*mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("FONTSIZE", (0,0), (-1,-1), 7.5),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story.append(t)
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        "Règle de sortie : un seul fichier PDF est produit par exécution. "
+        "Les données CSV/Excel internes restent inchangées ; elles ne génèrent pas "
+        "de PDF supplémentaires.",
+        styles["RapportSmall"]
+    ))
+
+    doc = SimpleDocTemplate(
+        str(pdf_path), pagesize=A4,
+        rightMargin=15*mm, leftMargin=15*mm,
+        topMargin=15*mm, bottomMargin=15*mm,
+        title="Rapport de veille APEC"
+    )
+    doc.build(story)
+
+    print(f"📄 Rapport PDF unique créé : {pdf_path}")
+    return pdf_path
+
 def main():
     bdd_candidats = preparer_bdd_candidats()
     stats_historique_runs = importer_historique_runs_dans_bdd(bdd_candidats)
@@ -3536,6 +3788,30 @@ def main():
 
     print()
     print("========================================")
+
+
+    # ========================================================
+    # RAPPORT PDF UNIQUE — UN SEUL DOCUMENT PAR EXECUTION
+    # ========================================================
+    try:
+        generer_rapport_pdf_unique(
+            delta=delta,
+            stats_operateurs=stats_operateurs,
+            pertinents=pertinents,
+            a_verifier=a_verifier,
+            non_pertinents=non_pertinents,
+            ia_resultats=ia_resultats,
+            resultats_bruts=resultats_bruts,
+            externes=externes,
+            erreurs=erreurs,
+            duree_total=duree_total,
+            appels_31=locals().get("appels_31", 0),
+            appels_38=locals().get("appels_38", 0),
+            sauvegarde_ok=sauvegarde_ok,
+            synchronisation_ok=synchronisation_ok,
+        )
+    except Exception as e:
+        print(f"⚠️ Génération du rapport PDF impossible : {type(e).__name__}: {e}")
 
     if sauvegarde_ok:
         print("VEILLE TERMINÉE AVEC SUCCÈS")
