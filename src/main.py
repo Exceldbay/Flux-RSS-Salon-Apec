@@ -706,8 +706,6 @@ DEPARTEMENTS_FRANCAIS = {
     "92": "hauts-de-seine", "93": "seine-saint-denis", "94": "val-de-marne", "95": "val-d-oise",
 }
 
-DEPARTEMENTS_CIBLES_NOMS = {normaliser(v): k for k, v in NOMS_DEPARTEMENTS.items()}
-
 def _normaliser_geo_fort(texte):
     """Normalisation plus robuste pour comparer noms de départements/villes."""
     texte = unicodedata.normalize("NFKD", str(texte or "").lower())
@@ -727,6 +725,8 @@ def normaliser(texte):
     texte = re.sub(r"\s+", " ", texte)
     return texte.strip()
 
+
+DEPARTEMENTS_CIBLES_NOMS = {normaliser(v): k for k, v in NOMS_DEPARTEMENTS.items()}
 
 def contient_terme(texte, termes):
     texte = normaliser(texte)
