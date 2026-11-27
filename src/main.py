@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v39-audit-ia-bdd-3x31-plus1x38-geo"
+IA_RULES_VERSION = "v41-reconciliation-arbitrage-coherence-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -2945,6 +2945,44 @@ def classer_statut_final(resultat, decision):
 # COUCHE IA GEMINI
 # ============================================================
 
+def arbitrer_coherence_decision(resultat, decision):
+    """Sécurise les contradictions manifestes entre justification et décision IA."""
+    d = str(decision or "A_VERIFIER").strip().upper()
+    if d not in {"PERTINENT", "A_VERIFIER", "NON_PERTINENT"}:
+        return "A_VERIFIER", "DECISION_IA_INVALIDE"
+    texte = " ".join(str(resultat.get(k, "") or "") for k in (
+        "raison_ia", "analyse_humaine", "action_recommandee",
+        "raison_ia_1", "raison_ia_31_t2", "raison_ia_31_t3",
+        "raison_ia_38", "preuve_decisive_38", "apport_38",
+    )).lower()
+    negatifs = [x for x in [
+        "en décalage avec le positionnement de l'apec",
+        "en decalage avec le positionnement de l'apec",
+        "pas adapté à l'apec", "pas adapte a l'apec",
+        "non adapté à l'apec", "non adapte a l'apec",
+        "ne correspond pas au positionnement de l'apec",
+        "ne correspond pas à l'apec", "ne correspond pas a l'apec",
+        "pas de recrutement de cadres", "pas de recrutement cadre",
+        "orientation initiale", "formation initiale",
+        "lycéens/parents", "lyceens/parents",
+        "lycéens et parents", "lyceens et parents",
+        "public lycéen", "public lyceen",
+        "métiers de l'éducation nationale", "metiers de l'education nationale",
+        "préparation aux concours", "preparation aux concours",
+    ] if x in texte]
+    if d == "PERTINENT" and negatifs:
+        return "NON_PERTINENT", "ARBITRAGE_COHERENCE_NEGATIF:" + negatifs[0]
+    positifs = [x for x in [
+        "recrutement de cadres", "recrutement cadre", "jeunes diplômés",
+        "jeunes diplomes", "bac+5", "bac +5", "bac+3", "bac +3",
+        "relations entreprises", "forum entreprises", "rencontre entreprises",
+        "career day", "job dating", "recruteurs", "employeurs",
+    ] if x in texte]
+    if d == "NON_PERTINENT" and len(positifs) >= 2 and not negatifs:
+        return "A_VERIFIER", "ARBITRAGE_COHERENCE_POSITIF"
+    return d, ""
+
+
 def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     """Cascade conservatrice : 3 tours Gemini 3.1, puis TOP 3 en 3.8.
 
@@ -3008,8 +3046,12 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     candidats = sorted(candidats_geo_ok, key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
     nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
     a_analyser_bdd = nouveaux_bdd + modifies_bdd
+    # V41 : la mémoire globale est un cache de scoring, pas une mémoire IA.
+    # Un candidat NOUVEAU ou MODIFIÉ selon la BDD doit impérativement
+    # continuer vers la couche IA. Le scoring global est déjà géré dans
+    # traiter(); il ne doit donc pas retirer de candidats du flux IA.
     memoire_globale = charger_memoire_globale()
-    a_verifier_memoire, _ = appliquer_memoire_globale(a_analyser_bdd, memoire_globale)
+    a_verifier_memoire = a_analyser_bdd
     a_traiter, memorises = appliquer_memoire_ia(a_verifier_memoire, memoire_ia)
 
     # ------------------------------------------------------------
@@ -3129,6 +3171,10 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         r["raison_ia"] = analyse.get("raison_ia_31_t3", r.get("raison_ia_1", ""))
         r["modele_ia"] = MODEL_31 if 'MODEL_31' in globals() else "gemini-3.1-flash-lite"
         r["analyse_humaine"] = r.get("raison_ia_31_t3", "")
+        decision_coherente, motif_coherence = arbitrer_coherence_decision(r, r["decision_ia"])
+        r["decision_ia_brute_31_t3"] = r["decision_ia"]
+        r["decision_ia"] = decision_coherente
+        r["arbitrage_coherence"] = motif_coherence
         classer_statut_final(r, r["decision_ia"])
         t3_ok.append(r)
 
@@ -3171,6 +3217,11 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
             r["arbitrage_38"] = arbitrage
             r["decision_ia_38_brute"] = analyse38.get("decision_ia_38", "")
             r["decision_ia"] = decision_finale
+            decision_coherente, motif_coherence = arbitrer_coherence_decision(r, r["decision_ia"])
+            r["decision_ia_brute_38_arbitrage"] = r["decision_ia"]
+            r["decision_ia"] = decision_coherente
+            if motif_coherence:
+                r["arbitrage_coherence"] = motif_coherence
             r["confiance_ia"] = analyse38.get("confiance_ia_38", r.get("confiance_ia", 0))
             r["raison_ia"] = analyse38.get("raison_ia_38", r.get("raison_ia", ""))
             r["analyse_humaine"] = analyse38.get("analyse_humaine_38", r.get("analyse_humaine", ""))
@@ -3231,6 +3282,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         "a_traiter_reellement": len(a_traiter),
         "bdd_reutilises": len(reutilises_bdd) + len(geo_reutilises_bdd),
         "memoire_reutilisee": len(memorises),
+        "memoire_globale_bypass_ia": 0,
         "geo_bloques": len(geo_preexclus),
         "quota_bloque": quota_bloque,
     }
@@ -4614,9 +4666,9 @@ def main():
     total_reconcilie = bdd_r + mem_r + gem_r + geo_r
     AUDIT_PIPELINE["candidats_perdus_reconciliation"] = max(0, entree_ia - total_reconcilie)
     if entree_ia == total_reconcilie:
-        print(f"✅ V40 RÉCONCILIATION : {entree_ia} = {total_reconcilie}")
+        print(f"✅ V41 RÉCONCILIATION : {entree_ia} = {total_reconcilie}")
     else:
-        print(f"⚠️ V40 RÉCONCILIATION : entrée={entree_ia} | BDD={bdd_r} | mémoire={mem_r} | Gemini={gem_r} | geo={geo_r} | perdus={AUDIT_PIPELINE['candidats_perdus_reconciliation']}")
+        print(f"⚠️ V41 RÉCONCILIATION : entrée={entree_ia} | BDD={bdd_r} | mémoire IA={mem_r} | Gemini={gem_r} | geo={geo_r} | perdus={AUDIT_PIPELINE['candidats_perdus_reconciliation']}")
 
     # ========================================================
     # DELTA D'AFFICHAGE — UNIQUEMENT NOUVEAUX / MODIFIÉS
