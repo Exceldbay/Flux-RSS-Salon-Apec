@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v37-geo-inviolable-3x31-plus1x38-stats"
+IA_RULES_VERSION = "v38-audit-pipeline-3x31-plus1x38-geo"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -158,6 +158,28 @@ LAST_IA_STATS = {
     "memoire_reutilisee": 0,
     "geo_bloques": 0,
     "quota_bloque": False,
+}
+
+# Audit complet du pipeline du run courant. Les compteurs sont séparés afin
+# que le PDF distingue clairement collecte, filtrage, traitement et IA.
+AUDIT_PIPELINE = {
+    "requetes_generees": 0,
+    "rss_brut": 0,
+    "externes_brut": 0,
+    "total_brut": 0,
+    "apres_pre_filtre": 0,
+    "rejets_pre_filtre": 0,
+    "motifs_rejets": {},
+    "apres_traitement": 0,
+    "pertinents_python": 0,
+    "a_verifier_python": 0,
+    "non_pertinents_python": 0,
+    "candidats_ia_entree": 0,
+    "candidats_ia_reels": 0,
+    "resultats_ia": 0,
+    "pertinents_final": 0,
+    "a_verifier_final": 0,
+    "non_pertinents_final": 0,
 }
 
 # Journal détaillé de la phase de recherche RSS.
@@ -293,7 +315,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v37-geo-inviolable"
+VERSION_PROGRAMME = "2026-11-27-v38-audit-pipeline"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -4043,6 +4065,9 @@ def generer_rapport_pdf_unique(
     ia_resultats=None,
     resultats_bruts=None,
     externes=None,
+    rejets_pretraitement=None,
+    motifs_pretraitement=None,
+    audit_pipeline=None,
     erreurs=None,
     duree_total=0,
     appels_31=0,
@@ -4134,14 +4159,25 @@ def generer_rapport_pdf_unique(
     def header_row(values):
         return [cell(v, "RapportCellHead") for v in values]
 
+    audit = dict(AUDIT_PIPELINE)
+    if isinstance(audit_pipeline, dict):
+        audit.update(audit_pipeline)
+    motifs_audit = audit.get("motifs_rejets") or motifs_pretraitement or {}
     resume = [
         header_row(["Indicateur", "Résultat"]),
-        [cell("Candidats collectés"), cell(nb(resultats_bruts))],
-        [cell("Sources externes"), cell(nb(externes))],
-        [cell("Pertinents"), cell(nb(pertinents))],
-        [cell("À vérifier"), cell(nb(a_verifier))],
-        [cell("Non pertinents"), cell(nb(non_pertinents))],
-        [cell("Résultats IA"), cell(nb(ia_resultats))],
+        [cell("Requêtes générées"), cell(audit.get("requetes_generees", 0))],
+        [cell("Résultats RSS bruts"), cell(audit.get("rss_brut", 0))],
+        [cell("Sources externes brutes"), cell(audit.get("externes_brut", 0))],
+        [cell("Total brut collecté"), cell(audit.get("total_brut", 0))],
+        [cell("Candidats après pré-filtre"), cell(audit.get("apres_pre_filtre", 0))],
+        [cell("Rejets avant scoring / IA"), cell(audit.get("rejets_pre_filtre", 0))],
+        [cell("Après traitement Python"), cell(audit.get("apres_traitement", 0))],
+        [cell("Entrée IA"), cell(audit.get("candidats_ia_entree", 0))],
+        [cell("Analyses IA réelles"), cell(audit.get("candidats_ia_reels", 0))],
+        [cell("Résultats IA"), cell(audit.get("resultats_ia", 0))],
+        [cell("Pertinents finaux"), cell(audit.get("pertinents_final", len(pertinents)))],
+        [cell("À vérifier finaux"), cell(audit.get("a_verifier_final", len(a_verifier)))],
+        [cell("Non pertinents finaux"), cell(audit.get("non_pertinents_final", len(non_pertinents)))],
         [cell("Appels Gemini 3.1"), cell(appels_31)],
         [cell("Appels Gemini 3.8"), cell(appels_38)],
         [cell("Erreurs"), cell(erreurs_nb)],
@@ -4161,7 +4197,55 @@ def generer_rapport_pdf_unique(
     ]))
     story.append(t)
 
-    story.append(Paragraph("2. Résultats prioritaires", styles["RapportSection"]))
+    story.append(Paragraph("2. Audit du pipeline", styles["RapportSection"]))
+    story.append(Paragraph(
+        "Cette section explique où les résultats disparaissent pendant le run. "
+        "Les rejets sont ceux de cette exécution uniquement ; ils ne sont pas ajoutés "
+        "aux résultats historiques affichés.", styles["RapportSmall"]
+    ))
+    audit_lignes = [header_row(["Étape", "Nombre"])]
+    for lib, cle in [
+        ("RSS brut", "rss_brut"), ("Sources externes brutes", "externes_brut"),
+        ("Total brut", "total_brut"), ("Après pré-filtre", "apres_pre_filtre"),
+        ("Rejets pré-filtre", "rejets_pre_filtre"), ("Après traitement Python", "apres_traitement"),
+        ("Entrée IA", "candidats_ia_entree"), ("Analyses IA réelles", "candidats_ia_reels"),
+    ]:
+        audit_lignes.append([cell(lib), cell(audit.get(cle, 0))])
+    if motifs_audit:
+        for motif, count in sorted(motifs_audit.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))):
+            audit_lignes.append([cell("Rejet — " + str(motif)), cell(count)])
+    t_audit = Table(audit_lignes, colWidths=[120*mm, 55*mm], repeatRows=1, splitByRow=1)
+    t_audit.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
+        ("GRID", (0,0), (-1,-1), 0.35, colors.grey),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+        ("LEFTPADDING", (0,0), (-1,-1), 4), ("RIGHTPADDING", (0,0), (-1,-1), 4),
+        ("TOPPADDING", (0,0), (-1,-1), 3), ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+    ]))
+    story.append(t_audit)
+
+    rejets = list(rejets_pretraitement or [])
+    if rejets:
+        story.append(Paragraph("2.1 Rejets du run — audit", styles["RapportSection"]))
+        rej_lignes = [header_row(["Candidat rejeté", "Motif", "Géographie / preuve"])]
+        for r in rejets[:40]:
+            preuve = (r.get("hors_geographie") or r.get("motif_exclusion") or
+                      r.get("pre_filtre_motif") or "—")
+            rej_lignes.append([
+                cell(r.get("titre", r.get("title", "Sans titre"))),
+                cell(r.get("pre_filtre_motif", r.get("motif_exclusion", "—"))),
+                cell(preuve),
+            ])
+        t_rej = Table(rej_lignes, colWidths=[70*mm, 45*mm, 60*mm], repeatRows=1, splitByRow=1)
+        t_rej.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#E8E8E8")),
+            ("GRID", (0,0), (-1,-1), 0.35, colors.grey), ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING", (0,0), (-1,-1), 3), ("RIGHTPADDING", (0,0), (-1,-1), 3),
+            ("TOPPADDING", (0,0), (-1,-1), 3), ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+        ]))
+        story.append(t_rej)
+
+    story.append(Paragraph("3. Résultats prioritaires", styles["RapportSection"]))
     lignes = [header_row(["Candidat", "Statut", "Score", "Raison / preuve"])]
     tous = list(pertinents or []) + list(a_verifier or [])
     for c in tous[:50]:
@@ -4190,7 +4274,7 @@ def generer_rapport_pdf_unique(
     ]))
     story.append(t)
 
-    story.append(Paragraph("3. Analyse IA et arbitrage", styles["RapportSection"]))
+    story.append(Paragraph("4. Analyse IA et arbitrage", styles["RapportSection"]))
     story.append(Paragraph(
         "Le rapport conserve les décisions IA disponibles à la fin de l'exécution. "
         "Les trois tours Gemini 3.1 et la sélection Gemini 3.8 sont regroupés dans "
@@ -4273,12 +4357,15 @@ def main():
     departements = load_yaml("departements.yml")
     requetes = construire_requetes(departements)
 
+    AUDIT_PIPELINE["requetes_generees"] = len(requetes)
+
     print()
     print(f"Requêtes générées : {len(requetes)}")
 
     demarrer_tache(0, f"{len(requetes)} requêtes")
     try:
         resultats_bruts, erreurs = collecter(requetes)
+        AUDIT_PIPELINE["rss_brut"] = len(resultats_bruts)
         terminer_tache(0, details=f"{len(resultats_bruts)} résultats, {erreurs} erreurs")
     except Exception as e:
         echouer_tache(0, str(e))
@@ -4315,7 +4402,11 @@ def main():
         externes = []
         terminer_tache(1, "ERREUR", erreur=f"{type(e).__name__}: {e}")
     else:
+        AUDIT_PIPELINE["externes_brut"] = len(externes)
         terminer_tache(1, details=f"{len(externes)} résultats externes")
+
+    AUDIT_PIPELINE["rss_brut"] = len(resultats_bruts)
+    AUDIT_PIPELINE["externes_brut"] = len(externes)
 
     # Aucun journal intermédiaire : le rapport PDF unique est généré en fin de run.
 
@@ -4332,7 +4423,11 @@ def main():
     # hors sujet ne deviennent jamais des « candidats » de la veille.
     resultats_collectes = externes + resultats_bruts
     nb_resultats_collectes_bruts = len(resultats_collectes)
+    AUDIT_PIPELINE["total_brut"] = nb_resultats_collectes_bruts
     resultats_bruts, rejets_pretraitement, motifs_pretraitement = filtrer_candidats_avant_scoring(resultats_collectes)
+    AUDIT_PIPELINE["apres_pre_filtre"] = len(resultats_bruts)
+    AUDIT_PIPELINE["rejets_pre_filtre"] = len(rejets_pretraitement)
+    AUDIT_PIPELINE["motifs_rejets"] = dict(motifs_pretraitement)
 
     print()
     print("========================================")
@@ -4344,10 +4439,9 @@ def main():
 
     if not resultats_bruts:
         print()
-        print("⚠️ AUCUN RÉSULTAT RSS.")
-        print("Les anciens résultats ne sont pas écrasés.")
+        print("⚠️ AUCUN CANDIDAT APRÈS LE PRÉ-FILTRE.")
+        print("Le run continue pour produire l’audit complet et conserver l’historique.")
         print(f"Erreurs HTTP/RSS : {erreurs}")
-        return
 
     # Mémoire globale chargée AVANT le scoring : un résultat inchangé
     # réutilise directement son score Python et ses composants, sans refaire
@@ -4356,7 +4450,11 @@ def main():
 
     demarrer_tache(2, f"{len(resultats_bruts)} résultats bruts")
     pertinents, a_verifier, non_pertinents = traiter(resultats_bruts, memoire_globale)
-    terminer_tache(2, details=f"{len(pertinents)+len(a_verifier)+len(non_pertinents)} résultats conservés après traitement")
+    AUDIT_PIPELINE["apres_traitement"] = len(pertinents) + len(a_verifier) + len(non_pertinents)
+    AUDIT_PIPELINE["pertinents_python"] = len(pertinents)
+    AUDIT_PIPELINE["a_verifier_python"] = len(a_verifier)
+    AUDIT_PIPELINE["non_pertinents_python"] = len(non_pertinents)
+    terminer_tache(2, details=f"{AUDIT_PIPELINE['apres_traitement']} résultats conservés après traitement")
 
     demarrer_tache(3)
     terminer_tache(3, details=f"{len(pertinents)} pertinents / {len(a_verifier)} à vérifier / {len(non_pertinents)} non pertinents")
@@ -4366,12 +4464,16 @@ def main():
     # --------------------------------------------------------
     demarrer_tache(5, f"{len(pertinents) + len(a_verifier)} candidats")
     memoire_ia = charger_memoire_ia()
+    AUDIT_PIPELINE["candidats_ia_entree"] = len(pertinents) + len(a_verifier)
     pertinents_ia, a_verifier_ia, ia_resultats = appliquer_ia(
         pertinents,
         a_verifier,
         memoire_ia,
         bdd_candidats,
     )
+
+    AUDIT_PIPELINE["resultats_ia"] = len(ia_resultats)
+    AUDIT_PIPELINE["candidats_ia_reels"] = LAST_IA_STATS.get("candidats_analyzes", 0)
 
     # ========================================================
     # DELTA D'AFFICHAGE — UNIQUEMENT NOUVEAUX / MODIFIÉS
@@ -4452,6 +4554,10 @@ def main():
     a_verifier = [r for r in a_verifier_ia if r.get("bdd_reutilise") is not True and r.get("ia_analyse") != "MEMOIRE"]
     non_pertinents = [r for r in (non_pertinents_python + non_pertinents_ia) if r.get("bdd_reutilise") is not True and r.get("ia_analyse") != "MEMOIRE"]
 
+    AUDIT_PIPELINE["pertinents_final"] = len(pertinents)
+    AUDIT_PIPELINE["a_verifier_final"] = len(a_verifier)
+    AUDIT_PIPELINE["non_pertinents_final"] = len(non_pertinents)
+
     total_dedoublonne = (
         len(pertinents)
         + len(a_verifier)
@@ -4470,6 +4576,15 @@ def main():
     print(f"À vérifier du jour : {len(a_verifier_jour)}")
     print(f"Non pertinents du jour : {len(non_pertinents_jour)}")
     print(f"Anciens candidats masqués : {len(ia_resultats) - len(resultats_du_jour)}")
+    print("\nAUDIT PIPELINE")
+    print(f"  Requêtes : {AUDIT_PIPELINE['requetes_generees']}")
+    print(f"  RSS brut : {AUDIT_PIPELINE['rss_brut']}")
+    print(f"  Externes brut : {AUDIT_PIPELINE['externes_brut']}")
+    print(f"  Total brut : {AUDIT_PIPELINE['total_brut']}")
+    print(f"  Après pré-filtre : {AUDIT_PIPELINE['apres_pre_filtre']}")
+    print(f"  Rejets pré-filtre : {AUDIT_PIPELINE['rejets_pre_filtre']}")
+    print(f"  Entrée IA : {AUDIT_PIPELINE['candidats_ia_entree']}")
+    print(f"  Analyses IA réelles : {AUDIT_PIPELINE['candidats_ia_reels']}")
     print("🛡️ Sorties quotidiennes verrouillées : NOUVEAU + MODIFIÉ uniquement")
 
     # Priorités 8-10 : delta, performance des opérateurs et sortie Teams.
@@ -4576,6 +4691,9 @@ def main():
             ia_resultats=resultats_du_jour,
             resultats_bruts=resultats_bruts_du_jour,
             externes=[r for r in externes if str(r.get("url") or "").strip() in urls_du_jour],
+            rejets_pretraitement=rejets_pretraitement,
+            motifs_pretraitement=motifs_pretraitement,
+            audit_pipeline=AUDIT_PIPELINE,
             erreurs=erreurs,
             duree_total=duree_total,
             appels_31=LAST_IA_STATS.get("appels_31", 0),
