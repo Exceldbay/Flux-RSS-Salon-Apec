@@ -1,6 +1,6 @@
 {
   "version": "v1",
-  "updated_at": "2026-11-27T09:37:15",
+  "updated_at": "2026-11-27T09:52:40",
   "items": {
     "url:https://www.ensma.fr/formation-ingenieur-specialite-statut-apprenti/debouches-temoignages": {
       "signature": "24e068af17574cbf3e2c16917bfec168c138c8ebf0b73d1127cf9f031817501b",
@@ -206,7 +206,7 @@
     },
     "url:https://www.ensil-ensci.unilim.fr/forum-avenir-notre-journee-stages-job-dating": {
       "signature": "18ce4509a49f99bb2ca694686eb650837a81e6e3b4dba2bc7282aac4ae3a347b",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum Avenir : notre journée stages et job dating - ENSIL-ENSCI",
         "url": "https://www.ensil-ensci.unilim.fr/forum-avenir-notre-journee-stages-job-dating/",
@@ -251,7 +251,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/nous-rencontrer": {
       "signature": "874f19f9d2eb3ddb0de7c46f4f6f5bb366e93877da72b2d30cbbd24fedd51b2a",
-      "date_memorisation": "2026-11-27T09:14:00",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Rencontrer 3iL Ingénieurs : JPO, salons, rendez-vous",
         "url": "https://www.3il-ingenieurs.fr/nous-rencontrer/",
@@ -450,7 +450,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/agenda/journees-portes-ouvertes": {
       "signature": "81f1a4f39364e04e4aa3258f4abf64779059ba92713d3fc10f77bf3c12cedce5",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée Portes ouvertes - Campus Nantes | 3iL Ingénieurs",
         "url": "https://www.3il-ingenieurs.fr/agenda/journees-portes-ouvertes/",
@@ -509,7 +509,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/actualites/formations-pedagogie/portes-ouvertes-viens-coder-ton-avenir-le-30-mai-2026": {
       "signature": "073ff87437c5c2aae2976cd75be672eeb24efb72cccafe084feb6126ce52f9e6",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Portes Ouvertes : viens coder ton avenir le 30 mai 2026 !",
         "url": "https://www.3il-ingenieurs.fr/actualites/formations-pedagogie/portes-ouvertes-viens-coder-ton-avenir-le-30-mai-2026/",
@@ -568,7 +568,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-campus-rodez": {
       "signature": "245f63a80fb968f92e7cb173a4a972fe2e6fc450e235e357a039fd00a2fd8fa9",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée Portes Ouvertes - Campus Rodez | 3iL Ingénieurs",
         "url": "https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-campus-rodez/",
@@ -627,7 +627,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-2": {
       "signature": "2cfa074fa08d742e323e3ce3fd0f539e322fe4bb9300c86416e933645475c88b",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée Portes Ouvertes - campus Limoges | 3iL Ingénieurs",
         "url": "https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-2/",
@@ -686,7 +686,7 @@
     },
     "url:https://www.3il-ingenieurs.fr/agenda/jpo-nantes-janvier": {
       "signature": "3efa7872b1925557fb9ef46d121c8bdca1b38210832798cb833d5ebd3276ec3e",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée Portes ouvertes - Campus Nantes | 3iL Ingénieurs",
         "url": "https://www.3il-ingenieurs.fr/agenda/jpo-nantes-janvier/",
@@ -694,11 +694,12 @@
         "description": "Journée Portes Ouvertes : Découvrez votre future école d'ingénieur informatique Participez à notre journée Portes Ouvertes 3iL Ingénieurs Nantes date 30 janvier 2027 Adresse Campus Nantes heure 9h - 13h Au programme de cette journée Lors de cette journée vous pourrez participer à : Une visite du campus Un temps…",
         "date_publication": "Tue, 29 Sep 2026 15:28:47 -0000",
         "departement": "19",
-        "nom_departement": "Corrèze",
+        "nom_departement": "corrèze",
         "annee_recherchee": "",
         "categorie_numero": 1,
         "categorie": "Salon étudiant / enseignement supérieur",
-        "mot_cle": "source:site_officiel"
+        "mot_cle": "source:site_officiel",
+        "geographie_stricte": "INDIRECTE"
       }
     },
     "url:https://ensip.univ-poitiers.fr/recrutement": {
@@ -981,7 +982,7 @@
     },
     "url:https://www.univ-poitiers.fr/portes-ouvertes-de-luniversite-de-poitiers": {
       "signature": "f8bec7fb86a81dcda3e4a2afdd8568397f606ba289b2aa3fbde7cb73d4102364",
-      "date_memorisation": "2026-11-27T09:14:00",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Portes ouvertes de l’université de Poitiers – le samedi 6 février 2027",
         "url": "https://www.univ-poitiers.fr/portes-ouvertes-de-luniversite-de-poitiers/",
@@ -1245,7 +1246,7 @@
     },
     "url:https://www.unilim.fr/des-etudes-ouvertes-sur-la-vie-active/un-accompagnement-a-la-recherche-demplois": {
       "signature": "85055155ffa19c564dfbfe7db7ab9f8a6c700cdecdb0456929f8ac0daeb86468",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Un accompagnement à la recherche d'emplois - Université de Limoges",
         "url": "https://www.unilim.fr/des-etudes-ouvertes-sur-la-vie-active/un-accompagnement-a-la-recherche-demplois/",
@@ -1974,7 +1975,7 @@
     },
     "url:https://www.eigsi.fr/category/rencontrez-nous": {
       "signature": "966a7c2dd716517cedd2998e0fa660e5e6564e80a69eafb229cec59ca153524c",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Ecole d'ingénieurs Portes Ouvertes, Salons, Evénements | EIGSI La Rochelle",
         "url": "https://www.eigsi.fr/category/rencontrez-nous/",
@@ -2998,7 +2999,7 @@
     },
     "url:https://www.excelia-group.fr/journees-portes-ouvertes-2026": {
       "signature": "61a174d5f2124a96c53d521b481b0a92a1e383a6b0465b7f752cfcd3d21bc7a4",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journées Portes Ouvertes EXCELIA | EXCELIA",
         "url": "https://www.excelia-group.fr/journees-portes-ouvertes-2026",
@@ -3330,20 +3331,62 @@
       }
     },
     "url:https://enjmin.cnam.fr/cnam-enjmin/agenda/journee-portes-ouvertes-2026-1630321.kjsp": {
-      "signature": "fc00f8a2a9ac30b77b1c64208c8802f8a511e5859a3f15ae4c603ec035a414a2",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "signature": "eeaf757de1a10324688f91601c7bd174be559a7e09272f57bcb66ddc9b7b8b41",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée portes ouvertes 2026",
         "url": "https://enjmin.cnam.fr/cnam-enjmin/agenda/journee-portes-ouvertes-2026-1630321.kjsp?RH=1499863421832",
+        "url_finale": "https://enjmin.cnam.fr/cnam-enjmin/agenda/journee-portes-ouvertes-2026-1630321.kjsp?RH=1499863421832",
         "source": "Cnam-Enjmin",
-        "description": "Partager Partager cette page Facebook Twitter Linkedin Journée portes ouvertes 2026 La prochaine journée portes ouvertes du Cnam-Enjmin se déroulera le samedi 5 décembre 2026 . Cette journée sera l'occasion d'échanger avec les élèves, l'équipe pédagogique et l'équipe administrative, en présentiel ou à distance . Présentations en amphi diffusées en direct et en replay sur notre chaîne YouTube 10h15-11h : présentation de l'école 11h-12h45 : présentation des 3 licences 12h45-14h : pause 14h-14h45 : présentation de l'école 14h45-16h : présentation du master 16h-16h30 : présentation du Mastère Spécialisé 10h15-11h : présentation de l'école 11h-12h45 : présentation des 3 licences 14h-14h45 : prése",
+        "description": "partager partager cette page facebook twitter linkedin journée portes ouvertes 2026 la prochaine journée portes ouvertes du cnam-enjmin se déroulera le samedi 5 décembre 2026 . cette journée sera l'occasion d'échanger avec les élèves, l'équipe pédagogique et l'équipe administrative, en présentiel ou à distance . présentations en amphi diffusées en direct et en replay sur notre chaîne youtube 10h15-11h : présentation de l'école 11h-12h45 : présentation des 3 licences 12h45-14h : pause 14h-14h45 : présentation de l'école 14h45-16h : présentation du master 16h-16h30 : présentation du mastère spécialisé 10h15-11h : présentation de l'école 11h-12h45 : présentation des 3 licences 14h-14h45 : prése journée portes ouvertes 2026 | enjmin | cnam cnam",
         "date_publication": "",
         "departement": "16",
-        "nom_departement": "Charente",
+        "nom_departement": "charente",
         "annee_recherchee": "",
+        "annee_detectee": "2026",
         "categorie_numero": 1,
         "categorie": "Salon étudiant / enseignement supérieur",
-        "mot_cle": "source:site_officiel"
+        "mot_cle": "source:site_officiel",
+        "score": 66,
+        "score_cible_apec": 66,
+        "score_emploi": 0,
+        "score_formation": 3,
+        "score_superieur": 3,
+        "score_apec": 8,
+        "score_entreprise": 4,
+        "score_qualifie": 8,
+        "score_geographie": 5,
+        "score_date": 0,
+        "score_bruit": 0,
+        "score_complementaire": 0,
+        "bonus_titre": 4,
+        "signaux_cible_apec": "cadre",
+        "signaux_superieur": "master, master, mastère",
+        "signaux_entreprise": "recrutement",
+        "signaux_exclusion": "",
+        "details_score": "vrai événement identifié | preuve événementielle | cible Apec directe: cadre | profil qualifié: master, mastère | enseignement supérieur: master | relation entreprises/recrutement: recrutement | supérieur + entreprises | source institutionnelle | géographie cible vérifiée | contexte qualifié: master, mastère",
+        "statut": "Pertinent",
+        "raison": "Cible Apec + événement + période suffisamment démontrés",
+        "motif": "",
+        "hors_periode": "NON",
+        "periode": "2026",
+        "evenement_detecte": "OUI",
+        "preuve_evenement": "OUI",
+        "geographie_verifiee": "OUI",
+        "hors_perimetre": "",
+        "hors_geographie": "",
+        "geographie_stricte": "INDIRECTE",
+        "geographie_stricte_motif": "Département de requête cible : 16, aucune contradiction géographique détectée",
+        "priorite_2027": "FAIBLE",
+        "niveau_source_v9": 2,
+        "statut_final": "Pertinent",
+        "decision_ia": "PERTINENT",
+        "confiance_ia": 95,
+        "raison_ia": "L'événement se déroule au Cnam-Enjmin à Angoulême (département 16) le samedi 5 décembre 2026. Le programme présente distinctement des cursus de niveau Master et Mastère Spécialisé (Bac+5 / Bac+6), parfaitement alignés avec la cible Apec (jeunes diplômés, poursuite d'études supérieures et formation/reconversion professionnelle de cadres).",
+        "page_enrichie": "OUI",
+        "date_evenement_page": "",
+        "lieu_page": "",
+        "organisateur_page": "cnam"
       }
     },
     "url:https://enjmin.cnam.fr/cnam-enjmin/agenda/salon-du-livre-et-de-la-presse-jeunesse-en-seine-saint-denis-2026-1630132.kjsp": {
@@ -3616,7 +3659,7 @@
     },
     "url:https://enjmin.cnam.fr/cnam-enjmin/agenda/journee-portes-ouvertes-2025-1576249.kjsp": {
       "signature": "e5814b0b2d043d7d2bfd728b4174305ab480f5c3352cd1817c2b7fb05493cdaf",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée portes ouvertes 2025",
         "url": "https://enjmin.cnam.fr/cnam-enjmin/agenda/journee-portes-ouvertes-2025-1576249.kjsp?RH=1499863421832",
@@ -7127,7 +7170,7 @@
     },
     "url:https://openagenda.com/semaine-industrie-2026/events/portes-ouvertes-du-pole-formation-uimm-site-de-niort": {
       "signature": "4fd9980076a29f1baf0f6831e3901b5ef9d7543c929121b07b752baa6500403b",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Portes ouvertes du Pôle Formation UIMM - Site de Niort",
         "url": "https://openagenda.com/semaine-industrie-2026/events/portes-ouvertes-du-pole-formation-uimm-site-de-niort",
@@ -8955,7 +8998,7 @@
     },
     "url:https://openagenda.com/orientation/events/journee-portes-ouvertes-groupe-alternance-niort": {
       "signature": "48592337224aa620efbd9e2f71be215fbb654f43ca6dfd3b4d09273341d8a266",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Journée Portes Ouvertes - Groupe Alternance NIORT",
         "url": "https://openagenda.com/orientation/events/journee-portes-ouvertes-groupe-alternance-niort",
@@ -11284,7 +11327,7 @@
     },
     "url:https://openagenda.com/francetravail/events/forum-emploi-and-solutions-locales-3501593": {
       "signature": "1f9f7568a2ce4ddccdd225604f9d46c53b1ff9f268c1d5f74e4c95c61bb1cd4c",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum Emploi & Solutions locales",
         "url": "https://openagenda.com/francetravail/events/forum-emploi-and-solutions-locales-3501593",
@@ -13402,7 +13445,7 @@
     },
     "url:https://openagenda.com/francetravail/events/rejoignez-nous-pour-lheure-des-opportunites-5765896": {
       "signature": "472ad344c7903e0f9bf7b8ccd944380bc8b898a2319dd6b7dcce6350c323c7eb",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Rejoignez-nous pour l'Heure des Opportunités !",
         "url": "https://openagenda.com/francetravail/events/rejoignez-nous-pour-lheure-des-opportunites-5765896",
@@ -13457,7 +13500,7 @@
     },
     "url:https://openagenda.com/francetravail/events/presentation-dune-structure-dinsertion-par-lactivite-economique-job-dating-saint-fiacre-1899726": {
       "signature": "dca2d0b0f6fe5184c6f7147ad8a3e93f1b72ea53dac144048d3d8f07115d0285",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Présentation d'une structure d'insertion par l'activité économique Job dating : \"Saint Fiacre\"",
         "url": "https://openagenda.com/francetravail/events/presentation-dune-structure-dinsertion-par-lactivite-economique-job-dating-saint-fiacre-1899726",
@@ -13516,7 +13559,7 @@
     },
     "url:https://openagenda.com/francetravail/events/presentation-dune-structure-dinsertion-par-lactivite-economique-job-dating-saint-fiacre-1308138": {
       "signature": "b3bc404f3d755922df9d71f1ee6c8ef6052f1d1dee17330511d93a141c2f54fa",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Présentation d'une structure d'insertion par l'activité économique Job dating : \"Saint Fiacre\"",
         "url": "https://openagenda.com/francetravail/events/presentation-dune-structure-dinsertion-par-lactivite-economique-job-dating-saint-fiacre-1308138",
@@ -13524,11 +13567,12 @@
         "description": "Information collective animée par la structure d'insertion \"Saint Fiacre\" qui présentera l'intérêt d'un chantier d'insertion ainsi que leurs différents supports d'activité (maraîchage bio, entretien d Date : 2026-12-07 au 2026-12-07. Lieu : Saint-Georges-des-Coteaux - Agence SAINTES SAINT GEORGES, Écurat. #TousMobilisés, Insertion, S'informer, Recrutement",
         "date_publication": "",
         "departement": "17",
-        "nom_departement": "Charente-Maritime",
+        "nom_departement": "charente-maritime",
         "annee_recherchee": "",
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
-        "mot_cle": "source:openagenda"
+        "mot_cle": "source:openagenda",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://openagenda.com/francetravail/events/permanence-du-plie-la-rochelle-plan-local-insertion-emploi-a-la-mairie-de-yves-9739308": {
@@ -14412,7 +14456,7 @@
     },
     "url:https://openagenda.com/francetravail/events/rejoignez-nous-pour-lheure-des-opportunites-5956916": {
       "signature": "70a40cd17cbec422833db8edd8db43b836677c3ce2575c73564a29703d91382d",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Rejoignez-nous pour l'Heure des Opportunités !",
         "url": "https://openagenda.com/francetravail/events/rejoignez-nous-pour-lheure-des-opportunites-5956916",
@@ -14420,11 +14464,12 @@
         "description": "Un évènement pour booster votre recherche d'emploi ! Vous pourrez : - Consulter l'agenda des évènements à venir (forums, job dating, visites d'entreprises, réunions d'informations sur les formations,. Date : 2026-12-18 au 2026-12-18. Lieu : Surgères - Agence LA ROCHELLE-VILLENEUVE, Surgères. S'informer",
         "date_publication": "",
         "departement": "17",
-        "nom_departement": "Charente-Maritime",
+        "nom_departement": "charente-maritime",
         "annee_recherchee": "",
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
-        "mot_cle": "source:openagenda"
+        "mot_cle": "source:openagenda",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://openagenda.com/francetravail/events/les-mercredis-de-linterim-rencontre-avec-triangle-solutions-rh-interim-6369829": {
@@ -16009,7 +16054,7 @@
     },
     "url:https://openagenda.com/francetravail/events/job-dating-interim-16-9187931": {
       "signature": "f0a61390308fc1535485cb19dc8293d2683e203502e580480be8300dd118d7e2",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Job Dating INTERIM 16",
         "url": "https://openagenda.com/francetravail/events/job-dating-interim-16-9187931",
@@ -20093,7 +20138,7 @@
     },
     "url:https://www.lepetiteconomiste.com/3e-forum-emploi-handicap-dans-la-vienne": {
       "signature": "bbbab35d34c22b92cf9af57922686647816f6c1f7352eca688a35ffeccf7416e",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "3e Forum Emploi Handicap dans la Vienne",
         "url": "https://www.lepetiteconomiste.com/3e-Forum-Emploi-Handicap-dans-la-Vienne",
@@ -20140,7 +20185,7 @@
     },
     "url:https://www.ledauphine.com/sante/2024/02/17/isere-vienne-job-dating-des-professionnels-de-sante-presentent-leurs-activites": {
       "signature": "84a08d2e1f2e69016da355e4e2bbee803369f39cbf3042ab86bbe3986f7cd8ec",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Vienne Job dating : des professionnels de santé présentent leurs activités",
         "url": "https://www.ledauphine.com/sante/2024/02/17/isere-vienne-job-dating-des-professionnels-de-sante-presentent-leurs-activites",
@@ -20183,7 +20228,7 @@
     },
     "url:https://www.jds.fr/limoges/foires-et-salons/marches/job-dating-1614210_a": {
       "signature": "182e1c2c39b809ea786adac3ab2148cc8eb418e85cc2f64dd94a18438f8d2ac5",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Job Dating",
         "url": "https://www.jds.fr/limoges/foires-et-salons/marches/job-dating-1614210_A",
@@ -20242,7 +20287,7 @@
     },
     "url:https://www.ledauphine.com/societe/2026/01/31/job-dating-pour-les-saisonniers-80-offres-d-emplois-estivaux-en-charente-maritime": {
       "signature": "6f01a6474ee18ed7057dfa04e39a534647f153fad50fc59d11bea537780d1fa1",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Les Belleville Job dating pour les saisonniers : 80 offres d’emplois estivaux en Charente-Maritime",
         "url": "https://www.ledauphine.com/societe/2026/01/31/job-dating-pour-les-saisonniers-80-offres-d-emplois-estivaux-en-charente-maritime",
@@ -20250,11 +20295,12 @@
         "description": "80 offres d’emploi seront proposées pour la saison d’été en Charente-Maritime, ce mercredi 4 février, dans le cadre d’un job dating réservé aux saisonniers de la vallée. Par Régine Jay-Grillot - 31 ...",
         "date_publication": "Sat, 31 Jan 2026 09:00:00 GMT",
         "departement": "16",
-        "nom_departement": "Charente",
+        "nom_departement": "charente",
         "annee_recherchee": 2026,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
-        "mot_cle": "source:bing_news"
+        "mot_cle": "source:bing_news",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://www.sudouest.fr/charente-maritime/chatelaillon-plage/emploi-en-charente-maritime-le-job-dating-revient-pour-une-4e-edition-a-chatelaillon-plage-27738648.php": {
@@ -21001,7 +21047,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmiqafbvv95cuxqcxjxdfridhj5bldvowl0txdvqu9hlvg5bc0xnxdkq19otuf6odvrytdkvvhbzhzrz25nr2twddluak9vc3hjv29szzfuvlzhvtzoqjrmaepyaxe0vhl1b0xkttduqv9ksxzsdtrbcnjyueftwkpkzknizkl3qk5rctnqnxbdb3q1wnd4tmldmldwqvzfq2nclujxajb1a19gam5pcmi1tgw": {
       "signature": "a2bf5da41d7b7c4d38e33f3b6b375377cf47f89eef8c2c584cd5d0cb1e834091",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum emploi à Gençay : un beau succès - lanouvellerepublique.fr",
         "url": "https://news.google.com/rss/articles/CBMiqAFBVV95cUxQcXJXdFRIdHJ5bldvOWl0TXdvQU9HLVg5bC0xNXdKQ19OTUF6ODVrYTdkVVhBZHZRZ25NR2tWdDluak9Vc3hjV29sZzFUVlZHVTZoQjRmaEpyaXE0VHl1b0xKTTduQV9kSXZSdTRBcnJYUEFtWkpkZkNiZkl3Qk5RcTNQNXBDb3Q1Wnd4TmlDMldWQVZfQ2NCLUJXajB1a19Gam5pcmI1TGw?oc=5",
@@ -21009,12 +21055,13 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmiqafbvv95cuxqcxjxdfridhj5bldvowl0txdvqu9hlvg5bc0xnxdkq19otuf6odvrytdkvvhbzhzrz25nr2twddluak9vc3hjv29szzfuvlzhvtzoqjrmaepyaxe0vhl1b0xkttduqv9ksxzsdtrbcnjyueftwkpkzknizkl3qk5rctnqnxbdb3q1wnd4tmldmldwqvzfq2nclujxajb1a19gam5pcmi1tgw?oc=5\" target=\"_blank\">forum emploi à gençay : un beau succès</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">lanouvellerepublique.fr</font>",
         "date_publication": "Tue, 19 May 2026 07:00:00 GMT",
         "departement": "86",
-        "nom_departement": "Vienne",
+        "nom_departement": "vienne",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "gencay"
+        "lieu": "gencay",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmimgjbvv95cuxpaezjsgputuvqngzia05vv2xjngnmtw1zykjvv3rxm1zlnvjtvhzrsgtwwhrnee44zw5judliwnh2ek1kwlldanfawtdmx2zovffpckx0bw90uzbzdhz0wxa5ugd2zm0ymu1snustb19hbniwtwe1uvl2ehfwnedvb2fswfmzzzznx05jretwelbhdwpndg85v3awwdlsnehtreutx0jizgw3mk9uexnyme9rov94eedoznd4twtnnmq0rlh2u2hau3jhvvpsu1hcdlbuzxdgvfzpb2jftzjhb09mwvq5vem0rm9jufgyeky1egnjamd4rnvzlxi2sgfhatdqvhn6mg9hv191d3fyetlgy1lqohvqoue": {
@@ -21148,7 +21195,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmirafbvv95cuxotzrvzedizfdkwhf5vfhgu05davf6avzdzvrknnzvu1lucwvqa0f4rnawrdezznbnzuvtbxducnlhek5arhzac2dnyzdnsu1tzhlqd0zoa0nvcgmxtgfjctdxbdbqb2flt3poqxmtszdky08td3nrdtdxsg5hvnbeb0tteey4vhdpve1kwvjuts1jzhzcmxnwrvrstwvvzzv1zjvnqjzneu95yzet": {
       "signature": "ae8c84adc1d8b5018299161bfca1763f3705b564eb1d892f261338b59eab6283",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum emploi à Loudun : une nouvelle version plébiscitée - lanouvellerepublique.fr",
         "url": "https://news.google.com/rss/articles/CBMirAFBVV95cUxOTzRvZEdIZFdkWHF5VFhGU05DaVF6aVZDZVRKNnZvU1lucWVQa0F4RnAwRDEzZnBnZUVtbXdUcnlHek5aRHZac2dNYzdnSU1tZHlqd0Zoa0NvcGMxTGFjcTdxbDBQb2FLT3poQXMtSzdkY08td3NrdTdxSG5hVnBEb0tteEY4VHdPVE1KWVJUTS1JZHZCMXNWRVRSTWVVZzV1ZjVNQjZNeU95YzEt?oc=5",
@@ -21237,21 +21284,22 @@
       }
     },
     "url:https://news.google.com/rss/articles/cbmivafbvv95cuxpuvv0exhabvfishpfcw1mbuhpmg8xbktzumtpce85andvvxrndhbyv1hboxpclvrvumwxrxg4rkvux3uzbdnxnfpvt1bpchhtr2zlqw1rsfnbx0rftfmtqzljou80nfbquxp2nnfyn1njsvnfoxu3d1f4qzhrek8tujlqwmfevhbwdzz4wgvlzxz3ajrvlxbda3lrnujnx3f3zevjrhffns1amvl2lvbbzi12wxjvef9pzen1ca": {
-      "signature": "64e9e60504ad302beb1285e06f9577e29b6e6c189b3fa831257a7cd6db35cb0f",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "signature": "f483104f38613dd46a9eebc3df43dc04a2527325f4025a1921d20fc669e130d6",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Saint-Benoît : le Forum emploi handicap veut favoriser l’inclusion - lanouvellerepublique.fr",
         "url": "https://news.google.com/rss/articles/CBMivAFBVV95cUxPUVV0eXhabVFiSHpFcW1mbUhPMG8xbktzUmtPcE85andvVXRndHByV1hBOXpCLVRVUmwxRXg4RkVUX3UzbDNXNFpVT1BpcHhtR2ZLQW1rSFNBX0RFTFMtQzljOU80NFBqUXp2NnFYN1NJSVNfOXU3d1F4QzhRek8tUjlQWmFEVHBwdzZ4WGVlZXZ3ajRvLXBDa3lRNUJnX3F3ZEVjRHFFNS1aMVl2LVBBZi12WXJveF9PZEN1cA?oc=5",
         "source": "lanouvellerepublique.fr",
         "description": "<a href=\"https://news.google.com/rss/articles/cbmivafbvv95cuxpuvv0exhabvfishpfcw1mbuhpmg8xbktzumtpce85andvvxrndhbyv1hboxpclvrvumwxrxg4rkvux3uzbdnxnfpvt1bpchhtr2zlqw1rsfnbx0rftfmtqzljou80nfbquxp2nnfyn1njsvnfoxu3d1f4qzhrek8tujlqwmfevhbwdzz4wgvlzxz3ajrvlxbda3lrnujnx3f3zevjrhffns1amvl2lvbbzi12wxjvef9pzen1ca?oc=5\" target=\"_blank\">saint-benoît : le forum emploi handicap veut favoriser l’inclusion</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">lanouvellerepublique.fr</font>",
         "date_publication": "Mon, 24 Nov 2025 08:00:00 GMT",
-        "departement": "17",
-        "nom_departement": "Charente-Maritime",
+        "departement": "86",
+        "nom_departement": "vienne",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "rochefort"
+        "lieu": "rochefort",
+        "geographie_stricte": "INDIRECTE"
       }
     },
     "url:https://news.google.com/rss/articles/cbmi6afbvv95cuxqqkotovzkt3dgv01jcdvgsdjlq1labvhkxzbucgg3oeprohbgszr1n0pybwrou2xsz21xwxrxq0n3rnk3rmd5zxvpskvmclv4rtvbt3btsmnpnfrumudpejb5emloqulredgzwfrwrwzvtmzess1pnkfaoek2mtc5wnbqt1ltd2g3s2ftadrwvlf6ruliwtrhnwxirklpmxa3uxfrvtnoquppwkj4y2hwv29by2nsr3dhzw9pa1o0ufloenfoqzlzuvnxuhrrcus0odj6cfi5wdfyyvbymlrxv3fovjdste5n": {
@@ -46047,7 +46095,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmiugfbvv95cuxot2fncdk1afbilw5jluzyvel5vwp2zgvxmfjaswnjvwvrbwdnwnkxq0zvsgpycvpuze1objzjem4xtg9qvg4xrxrscdzyetrorujlqjhtsdrnx0dbbefyzvlkbm1csmprmur3du05sfdjlxvuu2m3efhxb3juvudmm1uzqk1lmetxovbwowvzaenfbwhzwlhkveywzmz5wdc5n2s3z1o4r25pnu9hds1lvhvlutfsxzc3nee": {
       "signature": "a732ce722410cc8e2ad3de587dca0fc458a3187f56f88fbc76f52f45712474de",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Le Forum Emploi Eau, Milieux, Sols & Biodéchet se tiendra le 4 juin à Ivry-sur-Seine (94) - Emploi-Environnement",
         "url": "https://news.google.com/rss/articles/CBMiugFBVV95cUxOT2FncDk1aFBILW5JLUZYVEl5VWp2ZGVxMFJaSWNjVWVRbWdnWnkxQ0ZvSGpYcVpUZE1objZjem4xTG9QVG4xRXRScDZyeTRORUJlQjhTSDRnX0dBbEFyZVlKbm1CSmpRMUR3dU05SFdjLXVUU2M3eFhxb3JUVUdMM1UzQk1LMEtxOVBwOWVzaENFbWhZWlhKVEYwZmZ5WDc5N2s3Z1o4R25PNU9hdS1LVHVLUTFsXzc3NEE?oc=5",
@@ -77498,7 +77546,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmiiwfbvv95cuxptfhidloydddzrkz4dvzqsehpyw92dxfuy3rbt2fyvkvpwdjishlmzenunwf6y1znnmpublzzouy3befurtv3x3dczc1icnh3vkq3ufzyrjhisuhcwxlxqzjsmwpkbwdsclrxymczdktom05xbedjrmdqatj6efa3quqtznjkcdryyjf3": {
       "signature": "35c11d0a3b1d569790eccc462481f8c4de7efbd49c0d49832b41f1fd4f965bbc",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum Emploi 86 à Poitiers : 2.500 offres proposées - lanouvellerepublique.fr",
         "url": "https://news.google.com/rss/articles/CBMiiwFBVV95cUxPTFhidloydDdZRkZ4dVZQSEhPYW92dXFuY3RBT2FyVkVpWDJISHlmZENuNWF6Y1ZnNmpUblZzOUY3bEFuRTV3X3dCZC1icnh3VkQ3UFZYRjhISUhCWXlXQzJSMWpKbWdSclRXYmczdktoM05XbEdJRmdQaTJ6eFA3QUQtZnJkcDRyYjF3?oc=5",
@@ -85951,7 +85999,7 @@
     },
     "url:https://www.ouest-france.fr/economie/emploi/capter-des-locaux-les-entreprises-valorisent-la-proximite-lors-de-ce-job-dating-sur-lalternance-en-deux-sevres-3cba33d4-3998-11f1-84b8-e1d91f8f7aaa": {
       "signature": "8388afd7b44ee5d9926cc53312ccac20a40007c92c64b50675a26f2f2452884d",
-      "date_memorisation": "2026-11-27T09:14:00",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "« Capter des locaux » : les entreprises valorisent la proximité lors de ce job dating sur l’alternance en Deux-Sèvres",
         "url": "https://www.ouest-france.fr/economie/emploi/capter-des-locaux-les-entreprises-valorisent-la-proximite-lors-de-ce-job-dating-sur-lalternance-en-deux-sevres-3cba33d4-3998-11f1-84b8-e1d91f8f7aaa",
@@ -96840,7 +96888,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmix0fvx3lxte5uvuhmdhzhv2zmsu52c1fpreloewvyrgzxae0tzktqc3zix2rplunqyufgqvfmz0nirfe2wmq4add1uefrajjncdgya2zurwtlv1biagxkuupqrknkyw1v": {
       "signature": "50a45d9ba3883afccd0a5ba6b48d3476596d4aa8c9602c84d5c61a8280c04fcd",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "3e Forum emploi - Site du CHU de Poitiers",
         "url": "https://news.google.com/rss/articles/CBMiX0FVX3lxTE5uVUhMdHZHV2ZMSU52c1FpREloeWVyRGZXaE0tZktqc3ZiX2RPLUNQYUFGQVFmZ0NIRFE2WmQ4aDd1UEFRajJNcDgya2ZuRWtlV1BiaGxkUUpQRkNKYW1v?oc=5",
@@ -96920,7 +96968,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmiuwfbvv95cuxoytjymllfdlgzvg1pwm5edjltnfuzcjvjzhn2cmlkc2lqy1jyrlnmrha3vlctuxffymnxbhb1vxrrchhibnvrvgh1qlz6snv0yxbtauo4zwxrclbhwddxswrzqjrpnwq4c2nuswd1yl9zyvlncmltyji5xzq4wwdswlzfuvdjndnpu0o2nwzfnedfrefydunelwfib05hcld5bzdishrqvhnlm0lmbjhyawhxtm1mtmtiuwxf": {
       "signature": "5130a5d7093aa96c9caa7704a855ef6a89368e5e30b7abb903d7dfb569be204c",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Second forum emploi du CHU de Poitiers : des job-dating pour échanger avec les professionnels - Site du CHU de Poitiers",
         "url": "https://news.google.com/rss/articles/CBMiuwFBVV95cUxOYTJyMllfdlgzVG1pWm5EdjlTNFUzcjVjZHN2cmlKc2lqY1JYRlNMRHA3VlctUXFFYmNxbHB1VXRRcHhibnVrVGh1QlZ6SnV0YXBTaUo4ZWxrclBhWDdxSWRzQjRPNWQ4c2NuSWd1Yl9zYVlNcmlTYjI5XzQ4WWdsWlZfUVdjNDNPU0o2NWZfNEdFREFydUNELWFIb05Hcld5bzdISHRqVHNLM0lmbjhyaWhxTm1mTmtiUWxF?oc=5",
@@ -97156,7 +97204,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmiywfbvv95cuxnslfvn2treunfbdz6stgzq2nmceetc1nxakzfy2lxqmdlyknym010t3fgow5bwm5qnjdln0e5nmnydxjkzjdsz05ienpyvmpive1pnm12svflvmhynfe0vjhfwwxuci1wa0gxnghymzhpvzliz0tyule3ruvwzkh2ehz2ohnvdnvouksyq1jtalbkmfdtandprvdfvtzsufbjnhrgngvft2dxmun6rvvauufjn3i2awfnnkjpve5haf9rdjhasxbvdxfksq": {
       "signature": "c938aaa1e63b3a8bd80c32a3241e63fb4d93a82d28421907d4ebe568da05f495",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "La Rochefoucauld : Carton plein pour le forum emploi et formation - Charente Libre",
         "url": "https://news.google.com/rss/articles/CBMiywFBVV95cUxNSlFVN2tReUNfbDZ6STgzQ2NmcEEtc1NXakZFY2lxQmdlYkNYM010T3FGOW5BWm5qNjdlN0E5NmNYdXJKZjdSZ05IenpyVmpiVE1pNm12SVFLVmhYNFE0VjhfWWxuci1wa0gxNGhyMzhpVzliZ0tyUlE3RUVwZkh2eHZ2OHNVdnVOUksyQ1JtalBkMFdtandPRVdFVTZsUFBJNHRGNGVFT2dxMUN6RVVaUUFJN3I2aWFNNkJpVE5HaF9rdjhaSXBvdXFkSQ?oc=5",
@@ -97164,12 +97212,13 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmiywfbvv95cuxnslfvn2treunfbdz6stgzq2nmceetc1nxakzfy2lxqmdlyknym010t3fgow5bwm5qnjdln0e5nmnydxjkzjdsz05ienpyvmpive1pnm12svflvmhynfe0vjhfwwxuci1wa0gxnghymzhpvzliz0tyule3ruvwzkh2ehz2ohnvdnvouksyq1jtalbkmfdtandprvdfvtzsufbjnhrgngvft2dxmun6rvvauufjn3i2awfnnkjpve5haf9rdjhasxbvdxfksq?oc=5\" target=\"_blank\">la rochefoucauld : carton plein pour le forum emploi et formation</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">charente libre</font>",
         "date_publication": "Wed, 09 Apr 2025 07:00:00 GMT",
         "departement": "16",
-        "nom_departement": "Charente",
+        "nom_departement": "charente",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "la rochefoucauld"
+        "lieu": "la rochefoucauld",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmikafbvv95cuxqwnbwuefcqwtxzwhunm4yzjziwhcwvffob2xtvxbir0hjwuw2mdlxb0fuswhtahnwzzljnljqveo0sldbuwe2su11y29kotnwr1yzdxztdhuzdknpuejtmy1tyxrmytnqwldoue9ivvded2oyavlsvxlcntctqlljcmw2qtficzk2rhloyxdhm2w": {
@@ -97469,7 +97518,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmijgjbvv95cuxnbf9nztjyzgn3vu9jsfvvrs12odvbsklzskvmuvdtum5hdfhpqk0tu3v0shzilxppslndmf85q0xcaw4ybu5wai1dvxriswjvmmxvc28zagnpz1plrulhnmk3x084bmfsntrfy1d0q3j4ohr6cvf1ci00vm85x0jxtkm1rexodnp2wkzceg1km3bmtw52qjnotvjralvaa3dbekzkq0w1vvjknk43t0wxukvyvwpwythrngd6run3wxfwqkg3nmpxrnltofzzzmx3dwfwqkztsmpevuwwehdpbmnhx1vpa285ykhav2jhr2lkwfv5tjrku0ffa0hqazc0zvgxvg40c0c2bhj2u2c": {
       "signature": "bfc5c747439ce0b9d60bb8d966cba0b0fd139a97c15ee9d495206f10099dfb9e",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Au lieu de préparer sa thèse, il signe un CDI chez CGI : tout a commencé au Forum emploi handicap à Clermont-Ferrand - La Montagne",
         "url": "https://news.google.com/rss/articles/CBMijgJBVV95cUxNbF9nZTJYZGN3VU9jSFVvRS12ODVBSklZSkVmUVdTUm5hdFhPQk0tU3V0SHZILXpPSlNDMF85Q0xCaW4ybU5wai1DVXRISWJvMmxVc28zaGNpZ1pLRUlHNmk3X084bmFsNTRfY1d0Q3J4OHR6cVF1ci00Vm85X0JXTkM1RExodnp2WkZCeG1kM3BMTW52QjNOTVJRalVaa3dBekZKQ0w1VVJkNk43T0wxUkVYVWpWYThrNGd6RUN3WXFWQkg3NmpxRnlTOFZzZmx3dWFwQkZtSmpEVUwweHdPbmNhX1VPa285YkhaV2JHR2lKWFV5TjRkU0Ffa0hQazc0ZVgxVG40c0c2bHJ2U2c?oc=5",
@@ -97477,12 +97526,13 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmijgjbvv95cuxnbf9nztjyzgn3vu9jsfvvrs12odvbsklzskvmuvdtum5hdfhpqk0tu3v0shzilxppslndmf85q0xcaw4ybu5wai1dvxriswjvmmxvc28zagnpz1plrulhnmk3x084bmfsntrfy1d0q3j4ohr6cvf1ci00vm85x0jxtkm1rexodnp2wkzceg1km3bmtw52qjnotvjralvaa3dbekzkq0w1vvjknk43t0wxukvyvwpwythrngd6run3wxfwqkg3nmpxrnltofzzzmx3dwfwqkztsmpevuwwehdpbmnhx1vpa285ykhav2jhr2lkwfv5tjrku0ffa0hqazc0zvgxvg40c0c2bhj2u2c?oc=5\" target=\"_blank\">au lieu de préparer sa thèse, il signe un cdi chez cgi : tout a commencé au forum emploi handicap à clermont-ferrand</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">la montagne</font>",
         "date_publication": "Mon, 17 Mar 2025 07:00:00 GMT",
         "departement": "19",
-        "nom_departement": "Corrèze",
+        "nom_departement": "corrèze",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "brive"
+        "lieu": "brive",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmivafbvv95cuxqshzpavfzcwrwzwdfmjzwrzzotey2oupavs1kdnvtuf9scghjcjfksthmzlhrdtbcwujwdtfpd1brnxhqlwramuc5ulfwcxnmrle4bgrpvfpkzteyzfhvdfveswvscdhswtdhc3rcb211rdfcamnrrkw1egjja1hjcy0zu1jis2jra2vaownpcfngv2lrvg5xvwr6atfiahhpngiwqxdxcmzblupgtkoyt3e0z1lvy283dwzzsg": {
@@ -98288,7 +98338,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmixgfbvv95cuxnty04n0mxyxjhthlis1q1wnpczk1sa3nqqxvbc0j4rwptqzduz1iwdu8zwti4x0tvtfbysvplzljgutrsbnpeznnnctlbshi3ufjws1n3u09xu2rvcfqyegv1mwt2nu85tzdtbuzlwul2s1zds2rfbfrkdjzjexj1unzhdlbetkg5m2tyug1awk52dxvmuw9ulukyck1fythpdfjnuepvmtzuvwfmung5u3bodhrxahh2x2vyyulfcdyzrkzdn2c": {
       "signature": "19cacd5c9ca2aa8e9fbb87b7127f8a34ca5e672ee1b28650ad81309cd659546e",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Angoulême: Pôle Emploi et le SA XV s'associent pour créer un job dating - Charente Libre",
         "url": "https://news.google.com/rss/articles/CBMixgFBVV95cUxNTy04N0MxYXJhTHlIS1Q1WnpCZk1Sa3NqQXVBc0J4RWptQzdUZ1IwdU8zWTI4X0tvTFBYSVpLZlJGUTRsbnpEZnNncTlBSHI3UFJwS1N3U09XU2RVcFQyeGV1MWt2NU85TzdtbUZlWUl2S1ZDS2RfbFRkdjZjeXJ1UnZhdlBETkg5M2tYUG1aWk52dXVmUW9uLUkyck1fYThPdFJnUEpvMTZuVWFmUng5U3BodHRxaHh2X2VYYUlFcDYzRkZDN2c?oc=5",
@@ -98296,17 +98346,18 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmixgfbvv95cuxnty04n0mxyxjhthlis1q1wnpczk1sa3nqqxvbc0j4rwptqzduz1iwdu8zwti4x0tvtfbysvplzljgutrsbnpeznnnctlbshi3ufjws1n3u09xu2rvcfqyegv1mwt2nu85tzdtbuzlwul2s1zds2rfbfrkdjzjexj1unzhdlbetkg5m2tyug1awk52dxvmuw9ulukyck1fythpdfjnuepvmtzuvwfmung5u3bodhrxahh2x2vyyulfcdyzrkzdn2c?oc=5\" target=\"_blank\">angoulême: pôle emploi et le sa xv s'associent pour créer un job dating</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">charente libre</font>",
         "date_publication": "Fri, 23 Nov 2018 08:00:00 GMT",
         "departement": "16",
-        "nom_departement": "Charente",
+        "nom_departement": "charente",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "angouleme"
+        "lieu": "angouleme",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmihafbvv95cuxqaurhqmv5wdu1u194b0haxzrrx3k0vnl5qvoymdfyz19za3nqovhhsvl2mzzxa09satnbtlb1ogdeyxpwwxd0dexhni1aagt4v2xmywnwm1v5afctwmhfx0g0d3mxm0pts3ewmdrtmmhit0t1wxbqegm0d0rjv3pxm0jmulg": {
       "signature": "4e3a307f000050a820b32ba78f5fae00bf6acc2c58025fc0ec98e568b00843a9",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Forum emploi pour les travailleurs handicapés - CDG16",
         "url": "https://news.google.com/rss/articles/CBMihAFBVV95cUxQaURHQmV5WDU1U194b0haXzRrX3k0Vnl5QVoyMDFyZ19za3NQOVhhSVl2MzZxa09saTNBTlB1OGdEYXpWWXd0dExHNi1aaGt4V2xmYWNwM1V5aFctWmhfX0g0d3MxM0pTS3EwMDRtMmhiT0t1WXBQeGM0d0RjV3pXM0JmUlg?oc=5",
@@ -98314,12 +98365,13 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmihafbvv95cuxqaurhqmv5wdu1u194b0haxzrrx3k0vnl5qvoymdfyz19za3nqovhhsvl2mzzxa09satnbtlb1ogdeyxpwwxd0dexhni1aagt4v2xmywnwm1v5afctwmhfx0g0d3mxm0pts3ewmdrtmmhit0t1wxbqegm0d0rjv3pxm0jmulg?oc=5\" target=\"_blank\">forum emploi pour les travailleurs handicapés</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">cdg16</font>",
         "date_publication": "Fri, 24 Oct 2025 07:00:00 GMT",
         "departement": "16",
-        "nom_departement": "Charente",
+        "nom_departement": "charente",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "la rochefoucauld"
+        "lieu": "la rochefoucauld",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmieefvx3lxte4zelpzbjnnwkq4nfvrqtjdmet4chrztjrmctz3b3ljujfyenrnul95ogjacvf2vhz1qlhredzlmdhyrtvocxvjy3dsd2utrevgqvnmzlpuwlm5cjdom1rebhdmz0sxctr2a3hbm2vrqks2nnbztvhkwq": {
@@ -98463,8 +98515,8 @@
       }
     },
     "url:https://news.google.com/rss/articles/cbmi5afbvv95cuxqrklqdxnnqtbvsepwte1pzwtjrgrrd0n0wkvfajlkanbjwmpabkdnd3nxmmtaz01xalzzvgzfsgvivvnoqvzbyw9xrhows1c4c0v6zer2qtfzn0zsz00yrnnqq0zadkdcn3iyu3brb3pnb3ntoflxtgntsvo3eudqoeftuv9xdu42quprbum5wdg5mdlrsujxcvjcb0h5vkjhbw1szxvam1vfsusxu0vnstf3tw8wzjnhcgtlttfzumr5turkbdhtodhnqnzhnwuyc0t4afgxcjhhmzljtjdoakretee": {
-      "signature": "016ffd7b2571522c5a9d93605a06716be0938519749c49a4662df56ef9949ecb",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "signature": "a1257bc2f6f2f49a4214e11c900fffb5b9658618f9e03ddbc6239d9855e57963",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Le forum emploi du Clermont foot 63 revient au Gabriel-Montpied à Clermont-Ferrand - La Montagne",
         "url": "https://news.google.com/rss/articles/CBMi5AFBVV95cUxQRklqdXNnQTBVSEpWTE1pZWtJRGRRd0N0WkVfajlKanBJWmpabkdnd3NxMmtaZ01xalZZVGZfSGVIVVNOQVZBYW9xRHowS1c4c0V6ZER2QTFZN0ZSZ00yRnNQQ0ZadkdCN3IyU3BRb3pNb3NtOFlxTGNtSVo3eUdQOEFTUV9XdU42QUpRbUM5WDg5MDlrSUJxcVJCb0h5VkJHbW1sZXVaM1VfSUsxU0VnSTF3TW8wZjNhcGtLTTFZUmR5TURKbDhTODhNQnZHNWUyc0t4aFgxcjhHMzljTjdOakRETEE?oc=5",
@@ -98472,12 +98524,13 @@
         "description": "<a href=\"https://news.google.com/rss/articles/cbmi5afbvv95cuxqrklqdxnnqtbvsepwte1pzwtjrgrrd0n0wkvfajlkanbjwmpabkdnd3nxmmtaz01xalzzvgzfsgvivvnoqvzbyw9xrhows1c4c0v6zer2qtfzn0zsz00yrnnqq0zadkdcn3iyu3brb3pnb3ntoflxtgntsvo3eudqoeftuv9xdu42quprbum5wdg5mdlrsujxcvjcb0h5vkjhbw1szxvam1vfsusxu0vnstf3tw8wzjnhcgtlttfzumr5turkbdhtodhnqnzhnwuyc0t4afgxcjhhmzljtjdoakretee?oc=5\" target=\"_blank\">le forum emploi du clermont foot 63 revient au gabriel-montpied à clermont-ferrand</a>&nbsp;&nbsp;<font color=\"#6f6f6f\">la montagne</font>",
         "date_publication": "Tue, 23 Sep 2025 07:00:00 GMT",
         "departement": "19",
-        "nom_departement": "Corrèze",
+        "nom_departement": "corrèze",
         "annee_recherchee": 2027,
         "categorie_numero": 2,
         "categorie": "Emploi / recrutement / formation",
         "mot_cle": "forum emploi",
-        "lieu": "ussel"
+        "lieu": "brive",
+        "geographie_stricte": "OUI"
       }
     },
     "url:https://news.google.com/rss/articles/cbmitgfbvv95cuxqwkhywv9xd2zymzlmbfk5bwq5m0vuzlz1rwlzwedktndlelfxqk5lx1zfs1r6z1utqmdxsg1jvmhteehomvfjmmd0dwzywfrcx1z0tjlfvzg5bvkzvv94d3z5tzu1vdbidi1slxzkq3dezu5rsud0qthvexd0s3llwuntsgjtemnpbhr0dvzrtmfermsxrhltugzylvlda3rna0ndmhb3b0p5uf9vsgnjnvjfy29tzw": {
@@ -98630,7 +98683,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmijajbvv95cuxqakvcckj1uhv1snh2euzqwuxxd1hjz1o1vwx6sdvmshvmthczogxkn2xvtnpzz2lrqmh0mlfsaglrmjzgy1u2nwxnnud5d2poemporzltohzbaktps3dzrhzazgp0m2cxu1ftudlrb0pjwk8yegjunuxmdlpqaxlqoxz4eeyxbexzcglkvut5vgc5z0dwvjrtohg4nw92vjdea3kya1bemfvpzkvrmdl4wta4cdlgv2nlmdbwm3rnmu9ymvhrv1nlejexmnfswnpumglaburkafh3ve11akrynvu4m3neu09quzf1ykcxudzns09azvdwnhk5q2lbwv9yrtnzche0zjfevmxo": {
       "signature": "318afc81a3aeb45a9541c5a0083ec7871603e32b2fa74c964481c303aaa3e932",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Avancer malgré tout : les 60 recruteurs du forum Emploi Handicap regardent au-delà des préjugés à Clermont-Ferrand - La Montagne",
         "url": "https://news.google.com/rss/articles/CBMijAJBVV95cUxQakVCckJ1UHV1Snh2eUZQWUxXd1hjZ1o1VWx6SDVmSHVMTHczOGxKN2xvTnpzZ2lrQmh0MlFSaGlRMjZGY1U2NWxnNUd5d2poempoRzlTOHZBaktpS3dzRHZaZGp0M2cxU1FtUDlrb0pJWk8yeGJuNUxmdlpqaXlQOXZ4eEYxbExzcGlKVUt5VGc5Z0dwVjRTOHg4NW92VjdEa3kya1BEMFVPZkVRMDl4WTA4cDlGV2NLMDBwM3RnMU9yMVhRV1NlejExMnFsWnpUMGlabURKaFh3VE11akRyNVU4M3NEU09QUzF1YkcxUDZNS09aZVdWNHk5Q2lBWV9yRTNZcHE0ZjFEVmxo?oc=5",
@@ -98771,7 +98824,7 @@
     },
     "url:https://news.google.com/rss/articles/cbmi6wfbvv95cuxqwehnblrnadvvd2yyegthvtrjltvfn0vtzlnzmmmxqs1ubvbfrlbqdi15rlo1uwxxdmzzvg1oadvhnuoyd205wtfcvlo3rwp4mdjum01ummjxrdgza2y1um83qw90x3bxdfjrnmp4zwhkte9ruxjkrdfondqxewzqduffcfria0zeeu00n0hstwlhc1zsbjhadffbtmxlbmfmnv9vdkvwudfxwhpatmrru3ppby1jchlhee9vowdcewdkulkwam5owdhhwdlhmex2q2dpvzfvvtkzeutmzxdrs3zrb0vaqulkdgtj": {
       "signature": "e5de81dd9860b6aeec97321ddaa26295e02253a817e3054cd04e17abbc874518",
-      "date_memorisation": "2026-11-27T09:37:15",
+      "date_memorisation": "2026-11-27T09:52:40",
       "champs": {
         "titre": "Un forum emploi travail pour préparer la réinsertion, au centre pénitentiaire de Moulins-Yzeure - La Montagne",
         "url": "https://news.google.com/rss/articles/CBMi6wFBVV95cUxQWEhNblRNaDVvd2YyeGthVTRJLTVFN0VTZlNzMmMxQS1ubVBfRlBQdi15Rlo1UWxxdmZZVG1oaDVHNUoyd205WTFCVlo3RWp4MDJUM01uMmJXRDgza2Y1Um83QW90X3BxdFJrNmp4ZWhKTE9RUXJKRDFONDQxeWZqdUFfcFRIa0ZEeU00N0hsTWlhc1ZsbjhadFFBTmxlbmFMNV9vdkVWUDFxWHpaTmRRU3pPby1jcHlheE9VOWdCeWdkUlkwam5oWDhhWDlHMEx2Q2dPVzFVVTkzeUtMZXdRS3Zrb0VaQUlkdGtj?oc=5",
