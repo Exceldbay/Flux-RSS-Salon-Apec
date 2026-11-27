@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v44-filtre-apec-strict-3x31-plus1x38"
+IA_RULES_VERSION = "2026-11-27-v44-filtre-apec-strict-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -2285,7 +2285,7 @@ APEC_MISSIONS_QUALIFIEES_V44 = [
 
 def filtrer_apec_strict_v44(candidat):
     """Barrière anti-bruit avant Gemini."""
-    texte = normalise(" ".join([
+    texte = normaliser(" ".join([
         str(candidat.get("titre", "") or ""),
         str(candidat.get("description", "") or ""),
         str(candidat.get("contenu_page", "") or "")[:18000],
@@ -2364,7 +2364,7 @@ def appliquer_grille_decision_apec_v44(candidat):
     une mission Apec identifiable et une preuve concrète. Sinon, on
     rétrograde vers A_VERIFIER. Les exclusions fortes restent prioritaires.
     """
-    texte = normalise(" ".join([
+    texte = normaliser(" ".join([
         str(candidat.get("titre", "") or ""),
         str(candidat.get("description", "") or ""),
         str(candidat.get("contenu_page", "") or "")[:16000],
