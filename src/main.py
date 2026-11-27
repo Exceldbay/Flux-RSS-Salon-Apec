@@ -13,6 +13,7 @@ import subprocess
 import sys
 import os
 from html import unescape
+import unicodedata
 
 # ============================================================
 # RAPPORT PDF UNIQUE PAR EXECUTION
