@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v42-preuves-multisources-3x31-plus1x38"
+IA_RULES_VERSION = "v43-cadrage-apec-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -324,7 +324,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v42-preuves-multisources"
+VERSION_PROGRAMME = "2026-11-27-v43-cadrage-apec"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -2051,6 +2051,74 @@ def _signaux(texte, patterns):
 # SCORING CIBLE APEC — LES OPERATEURS DE RECHERCHE RESTENT INCHANGES
 # ============================================================
 
+
+# ============================================================
+# V43 — CADRAGE MÉTIER APEC
+# ============================================================
+# Les requêtes de collecte restent volontairement inchangées.
+# Cette couche sert uniquement à cadrer l'analyse IA.
+APEC_PUBLICS_FORTS = [
+    "cadre", "cadres", "manager", "managers", "dirigeant", "dirigeants",
+    "ingenieur", "ingénieur", "experts", "expert",
+    "jeune diplome", "jeunes diplomes", "jeune diplômé", "jeunes diplômés",
+    "bac+3", "bac +3", "bac+5", "bac +5", "master", "mba", "doctorat",
+    "doctorant", "docteur", "alumni", "etudiants du superieur",
+    "étudiants du supérieur", "enseignement supérieur",
+]
+
+APEC_MISSIONS_FORTES = [
+    "recrutement de cadres", "recrutement cadre", "recrutement de cadres",
+    "relations entreprises", "relation entreprises", "relations entreprise",
+    "career", "career day", "job dating", "forum entreprises",
+    "rencontre entreprises", "rencontre recruteurs", "recruteurs",
+    "employeurs", "emploi cadre", "emplois cadres",
+    "mobilité professionnelle", "evolution professionnelle",
+    "évolution professionnelle", "reconversion professionnelle",
+    "carriere", "carrière", "accompagnement professionnel",
+]
+
+APEC_EXCLUSIONS_FORTES = [
+    "lyceens", "lycéens", "lycee", "lycée", "collegiens", "collégiens",
+    "college", "collège", "orientation post-3e", "post 3e",
+    "job etudiant", "job étudiant", "jobs étudiants", "job saisonnier",
+    "jobs saisonniers", "emploi saisonnier", "travail saisonnier",
+    "petits boulots", "interim", "intérim", "concours administratif",
+    "concours administratifs", "metiers de l'education nationale",
+    "métiers de l'éducation nationale",
+]
+
+def cadrer_apec_avant_ia(candidat):
+    """Produit une lecture métier déterministe avant Gemini.
+    Ne tranche pas à la place de l'IA : il structure les preuves et exclusions.
+    """
+    texte = normaliser(" ".join(str(candidat.get(k, "")) for k in (
+        "titre", "description", "titre_page", "description_page",
+        "extrait_page", "organisateur_page", "lieu_page"
+    )))
+    publics = [t for t in APEC_PUBLICS_FORTS if normaliser(t) in texte]
+    missions = [t for t in APEC_MISSIONS_FORTES if normaliser(t) in texte]
+    exclusions = [t for t in APEC_EXCLUSIONS_FORTES if normaliser(t) in texte]
+
+    candidat["apec_publics_detectes_v43"] = publics
+    candidat["apec_missions_detectees_v43"] = missions
+    candidat["apec_exclusions_detectees_v43"] = exclusions
+
+    if exclusions:
+        niveau = "HORS_MISSION_PROBABLE"
+    elif publics and missions:
+        niveau = "POTENTIEL_APEC_FORT"
+    elif publics or missions:
+        niveau = "POTENTIEL_APEC_A_VERIFIER"
+    else:
+        niveau = "PREUVE_APEC_INSUFFISANTE"
+
+    candidat["cadrage_apec_v43"] = niveau
+    candidat["question_apec_v43"] = (
+        "L'événement présente-t-il une opportunité concrète pour une mission Apec "
+        "et, si oui, laquelle ?"
+    )
+    return candidat
+
 APEC_DIRECT = [
     "apec", "apec connect", "cadre", "cadres", "cadre dirigeant",
     "jeune diplômé", "jeunes diplômés", "jeune diplômée", "jeunes diplômées",
@@ -3262,6 +3330,11 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     if a_traiter:
         print(f"🔎 V42 — vérification des preuves : {len(a_traiter)} candidats")
         verifier_preuves_multisources(a_traiter)
+
+    if a_traiter:
+        print(f"🧭 V43 — cadrage mission Apec : {len(a_traiter)} candidats")
+        for candidat in a_traiter:
+            cadrer_apec_avant_ia(candidat)
 
     if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
         a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
