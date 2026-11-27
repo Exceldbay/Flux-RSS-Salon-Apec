@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v36-rappel-precision-3x31-plus1x38-geo"
+IA_RULES_VERSION = "v37-geo-inviolable-3x31-plus1x38-stats"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -148,6 +148,17 @@ SIMILARITE_TITRE_DEDOUBLONNAGE = 0.94
 DATE_PUBLICATION_MIN = datetime(2025, 12, 1)
 
 thread_local = threading.local()
+
+# Statistiques IA du dernier traitement, exposées au rapport PDF.
+# Cela évite de perdre les compteurs car appliquer_ia() possède sa propre portée locale.
+LAST_IA_STATS = {
+    "appels_31": 0,
+    "appels_38": 0,
+    "candidats_analyzes": 0,
+    "memoire_reutilisee": 0,
+    "geo_bloques": 0,
+    "quota_bloque": False,
+}
 
 # Journal détaillé de la phase de recherche RSS.
 JOURNAL_RECHERCHE = []
@@ -282,7 +293,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v33-geo-prequeries-strictes"
+VERSION_PROGRAMME = "2026-11-27-v37-geo-inviolable"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -758,6 +769,99 @@ def date_publication_dt(date_publication):
         trouve = re.search(r"\b(20\d{2})\b", texte)
         return datetime(int(trouve.group(1)), 1, 1) if trouve else None
 
+
+
+def verifier_geographie_inviolable(resultat):
+    """Contrôle géographique indépendant, haute priorité.
+
+    Cette couche ne fait confiance ni au département porté par la requête,
+    ni à un champ lieu éventuellement mal extrait. Elle recherche d'abord
+    les preuves géographiques explicites dans les champs de localisation et
+    dans le titre de l'événement. Une preuve hors périmètre explicite prime
+    sur toute attribution automatique à un département cible.
+
+    Retourne (ok, motif, code).
+    """
+    champs_forts = {
+        "lieu_page": str(resultat.get("lieu_page", "") or ""),
+        "adresse_page": str(resultat.get("adresse_page", "") or ""),
+        "lieu": str(resultat.get("lieu", "") or ""),
+        "titre_page": str(resultat.get("titre_page", "") or ""),
+        "titre": str(resultat.get("titre", "") or ""),
+    }
+    lieu = _normaliser_geo_fort(" ".join(
+        champs_forts[k] for k in ("lieu_page", "adresse_page", "lieu")
+    ))
+    titres = _normaliser_geo_fort(" ".join(
+        champs_forts[k] for k in ("titre_page", "titre")
+    ))
+    contexte = _normaliser_geo_fort(" ".join(champs_forts.values()))
+
+    codes_hors = set()
+    codes_cibles = set()
+
+    # 1. Codes postaux : preuve très forte.
+    for source in (lieu, titres):
+        for cp in re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", source):
+            code = cp[:2]
+            (codes_cibles if code in DEPARTEMENTS_CIBLES else codes_hors).add(code)
+
+    # 2. Noms de départements dans les champs de lieu/adresse.
+    for code, nom in DEPARTEMENTS_FRANCAIS.items():
+        nn = _normaliser_geo_fort(nom)
+        if not nn:
+            continue
+        if re.search(r"(?<![a-z])" + re.escape(nn) + r"(?![a-z])", lieu):
+            (codes_cibles if code in DEPARTEMENTS_CIBLES else codes_hors).add(code)
+
+    # 3. Villes hors cible : uniquement lorsqu'elles sont dans un contexte
+    #    manifestement localisant. Un simple nom d'organisateur ne suffit pas.
+    marqueurs_lieu = (
+        r"(?:\ba\s+|\bà\s+|\bdans\s+|\bsur\s+|\bchez\s+|"
+        r"\blieu\s*[:\-]|\badresse\s*[:\-]|\bsite\s*[:\-]|\bcampus\s*[:\-]|"
+        r"\bse tiendra\s+(?:a|à)\s+|\baura lieu\s+(?:a|à)\s+|"
+        r"\bmairie\s+|[-–—]\s*)"
+    )
+    for ville in VILLES_HORS_CIBLE:
+        vn = _normaliser_geo_fort(ville)
+        if not vn:
+            continue
+        pattern = rf"{marqueurs_lieu}[^\n]{{0,80}}\b{re.escape(vn)}\b"
+        if re.search(pattern, contexte, flags=re.I):
+            codes_hors.add(
+                next((c for c, n in DEPARTEMENTS_FRANCAIS.items()
+                      if _normaliser_geo_fort(n) == vn), "")
+            )
+            # Ville hors cible connue : le code n'est pas nécessaire pour le rejet.
+            resultat["_geo_ville_hors_fort"] = ville
+            return False, f"Ville explicitement hors périmètre : {ville}", ""
+
+        # Cas particuliers d'arrondissements / quartiers, ex. « Lyon 3 ».
+        if vn == "lyon" and re.search(r"\blyon\s+(?:[1-9]|1er|2e|3e|4e|5e|6e|7e|8e|9e)\b", contexte, flags=re.I):
+            resultat["_geo_ville_hors_fort"] = "Lyon"
+            return False, "Localisation explicitement hors périmètre : Lyon", "69"
+
+    # 4. Ville cible explicite : elle peut confirmer la zone, mais ne doit
+    #    jamais écraser une preuve hors cible.
+    for code, villes in VILLES_DEPARTEMENTS.items():
+        for ville in villes:
+            vn = _normaliser_geo_fort(ville)
+            if vn and re.search(r"(?<![a-z])" + re.escape(vn) + r"(?![a-z])", lieu):
+                codes_cibles.add(code)
+            elif vn and re.search(rf"{marqueurs_lieu}[^\n]{{0,80}}\b{re.escape(vn)}\b", titres, flags=re.I):
+                codes_cibles.add(code)
+
+    if codes_hors:
+        code = sorted(codes_hors)[0]
+        nom = DEPARTEMENTS_FRANCAIS.get(code, code)
+        return False, f"Département explicitement hors périmètre : {nom}", code
+
+    if codes_cibles:
+        code = sorted(codes_cibles)[0]
+        return True, f"Localisation cible explicite : département {code}", code
+
+    # Pas de preuve locale contradictoire : on ne rejette pas.
+    return True, "Aucune preuve géographique hors cible détectée", str(resultat.get("departement", "")).strip()
 
 def verifier_geographie_stricte(resultat):
     """Filtre géographique ABSOLU.
@@ -2347,6 +2451,22 @@ def filtrer_candidats_avant_scoring(resultats):
         # 1. GÉOGRAPHIE : SEUL UN HORS-PÉRIMÈTRE EXPLICITE BLOQUE
         # ============================================================
         corriger_departement_par_ville(resultat)
+        geo_ok_fort, geo_motif_fort, geo_code_fort = verifier_geographie_inviolable(resultat)
+        if not geo_ok_fort:
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "HORS_GEOGRAPHIE",
+                "erreur_geographique": "ERREUR_GEOGRAPHIQUE",
+                "hors_geographie": geo_motif_fort,
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+                "geo_controle_fort": "BLOQUE",
+            })
+            rejetes.append(resultat)
+            motifs["HORS_GEOGRAPHIE"] = motifs.get("HORS_GEOGRAPHIE", 0) + 1
+            continue
+
         geo_ok, geo_motif, geo_code = verifier_geographie_stricte(resultat)
         if not geo_ok:
             resultat.update({
@@ -2373,6 +2493,34 @@ def filtrer_candidats_avant_scoring(resultats):
         # 2. EXCLUSIONS FORTES : BLOCAGE IMMÉDIAT
         # ============================================================
         signaux_exclusion = [x for x in exclusions if x in texte]
+
+        # Contextes manifestement hors veille Apec, même si la page utilise
+        # un mot événementiel générique comme « journée » ou « atelier ».
+        signaux_hors_apec = [
+            x for x in (
+                "crèche", "petite enfance", "bal des pompiers", "festival",
+                "concert", "spectacle", "tourisme", "destination france à vélo",
+                "lauréat", "lauréate", "prix touristique", "emploi-retraite",
+                "information retraite", "droits à la retraite"
+            ) if x in texte
+        ]
+        direct_ctx = [x for x in cible_directe if x in texte]
+        qual_ctx = [x for x in cible_qualifiee if x in texte]
+        rel_ctx = [x for x in relation if x in texte]
+        sup_ctx = [x for x in SUPERIEUR_FORT if x in texte]
+        if signaux_hors_apec and not (direct_ctx or qual_ctx or rel_ctx or sup_ctx):
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "CONTEXTE_HORS_APEC",
+                "motif_exclusion": ", ".join(signaux_hors_apec[:8]),
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["CONTEXTE_HORS_APEC"] = motifs.get("CONTEXTE_HORS_APEC", 0) + 1
+            continue
+
         if signaux_exclusion:
             resultat.update({
                 "pre_filtre": "REJETE",
@@ -2760,13 +2908,16 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     for c in a_traiter:
         geo2 = preanalyser_geographie(c)
         c.update(geo2)
+        geo_fort_ok, geo_fort_motif, geo_fort_code = verifier_geographie_inviolable(c)
         c["ia_preanalyse"] = "OUI"
-        if geo2.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+        if (not geo_fort_ok) or geo2.get("geo_preanalyse") == "GEO_HORS_CIBLE":
             c.update({
                 "ia_preexclusion_geo": "OUI",
                 "decision_ia": "NON_PERTINENT",
                 "confiance_ia": int(geo2.get("geo_confiance", 0) or 0),
-                "raison_ia": "Pré-exclusion géographique après enrichissement : " + geo2.get("geo_motif", "hors périmètre"),
+                "raison_ia": "Pré-exclusion géographique après enrichissement : " + (
+                    geo_fort_motif if not geo_fort_ok else geo2.get("geo_motif", "hors périmètre")
+                ),
                 "motif_exclusion": "HORS_GEOGRAPHIE",
                 "ia_analyse": "GEO_PREEXCLUSION",
                 "statut_final": "Non pertinent",
@@ -2920,12 +3071,15 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     # territoires dans le public/organisateur ne sont pas utilisées ici.
     for r in t3_ok:
         geo_final = preanalyser_geographie(r)
+        geo_fort_ok, geo_fort_motif, geo_fort_code = verifier_geographie_inviolable(r)
         r.update({k: v for k, v in geo_final.items() if k.startswith("geo_")})
-        if geo_final.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+        if (not geo_fort_ok) or geo_final.get("geo_preanalyse") == "GEO_HORS_CIBLE":
             r.update({
                 "decision_ia": "NON_PERTINENT",
                 "confiance_ia": int(geo_final.get("geo_confiance", 0) or 0),
-                "raison_ia": "Contrôle géographique final : " + geo_final.get("geo_motif", "hors périmètre"),
+                "raison_ia": "Contrôle géographique final : " + (
+                    geo_fort_motif if not geo_fort_ok else geo_final.get("geo_motif", "hors périmètre")
+                ),
                 "motif_exclusion": "HORS_GEOGRAPHIE",
                 "statut_final": "Non pertinent",
                 "geo_controle_final": "BLOQUE",
@@ -2949,6 +3103,16 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     print(f"Réutilisations BDD : {len(reutilises_bdd)} | mémoire IA : {len(memorises)}")
     print(f"Pré-exclusions géographiques : {len(geo_preexclus)}")
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
+
+    global LAST_IA_STATS
+    LAST_IA_STATS = {
+        "appels_31": appels_31,
+        "appels_38": appels_38,
+        "candidats_analyzes": len(t3_ok),
+        "memoire_reutilisee": len(memorises),
+        "geo_bloques": len(geo_preexclus),
+        "quota_bloque": quota_bloque,
+    }
 
     if not (IA_TEST_MODE and IA_TEST_NO_PERSIST):
         a_persister = [r for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("ia_analyse") in {"OUI", "GEO_PREEXCLUSION"}]
@@ -4343,6 +4507,12 @@ def main():
         "rejets_pretraitement": len(rejets_pretraitement),
     }
 
+    # Les compteurs IA proviennent directement de appliquer_ia(), pas de locals()
+    # de main(), afin que le PDF affiche les appels réellement effectués.
+    meta_resultats["appels_gemini_31"] = LAST_IA_STATS.get("appels_31", 0)
+    meta_resultats["appels_gemini_38"] = LAST_IA_STATS.get("appels_38", 0)
+    meta_resultats["candidats_analyses_ia"] = LAST_IA_STATS.get("candidats_analyzes", 0)
+
     synchronisation_ok = False
 
     # Le rapport Teams est envoyé APRÈS la synchronisation Excel afin de
@@ -4408,8 +4578,8 @@ def main():
             externes=[r for r in externes if str(r.get("url") or "").strip() in urls_du_jour],
             erreurs=erreurs,
             duree_total=duree_total,
-            appels_31=locals().get("appels_31", 0),
-            appels_38=locals().get("appels_38", 0),
+            appels_31=LAST_IA_STATS.get("appels_31", 0),
+            appels_38=LAST_IA_STATS.get("appels_38", 0),
             sauvegarde_ok=sauvegarde_ok,
             synchronisation_ok=synchronisation_ok,
         )
