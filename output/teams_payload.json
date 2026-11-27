@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "27/11/2026 10:33",
+            "text": "27/11/2026 11:07",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -73,28 +73,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 7.0s — 131 résultats, 20 erreurs",
+            "text": "✅ T01 — Collecte RSS · 2.0s — 143 résultats, 0 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 123.0s — 420 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 121.0s — 433 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 1.0s — 138 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage — 142 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 11 pertinents / 124 à vérifier / 3 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 12 pertinents / 127 à vérifier / 3 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -108,7 +108,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 5.0s — 22 candidats traités",
+            "text": "✅ T01 — Analyse IA · 394.0s — 27 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -163,19 +163,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "source:site_officiel — 16 uniques · 0 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "source:openagenda — 177 uniques · 0 pertinents · 0 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "source:bing_news — 4 uniques · 0 pertinents · 0 à vérifier",
+            "text": "source:site_officiel — 22 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -193,6 +181,18 @@
           },
           {
             "type": "TextBlock",
+            "text": "source:openagenda — 176 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
             "text": "Suivi d'exécution : ✅ Toutes les tâches sont terminées · 9/12 terminées",
             "wrap": true,
             "spacing": "Medium",
@@ -200,7 +200,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "IA : 0 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 0 · max : 3.1 illimité / 3.8 max 5",
+            "text": "IA : 4 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 0 · max : 3.1 illimité / 3.8 max 5",
             "isSubtle": true,
             "wrap": true,
             "spacing": "Medium"
