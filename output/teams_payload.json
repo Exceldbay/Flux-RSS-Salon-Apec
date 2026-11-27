@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "27/11/2026 08:43",
+            "text": "27/11/2026 09:01",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -35,7 +35,7 @@
               },
               {
                 "title": "Nouveaux 2027 à vérifier",
-                "value": "1"
+                "value": "0"
               },
               {
                 "title": "Évolutions utiles",
@@ -47,7 +47,7 @@
               },
               {
                 "title": "À vérifier actuels",
-                "value": "1"
+                "value": "0"
               },
               {
                 "title": "Tâches terminées",
@@ -61,33 +61,9 @@
           },
           {
             "type": "TextBlock",
-            "text": "À regarder en priorité",
-            "weight": "Bolder",
+            "text": "Aucun nouveau signal suffisamment utile depuis la dernière veille.",
+            "wrap": true,
             "spacing": "Medium"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Enseignement supérieur. L’école d’ingénieurs Isen ouvrira son nouveau campus sur la presqu'île de Caen en 2027 - Ouest-France",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**2027 À VÉRIFIER** · dép. 79 · score 44 · 2027 MOYENNE · date non précisée · Ouest-France",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMirwJBVV95cUxNV183MC1tc1JWWDh0V28wYXVmYXJrZElOenZJcmZBeHo2bXdMTFRJdllBMXg1Z3VqSmxSY1BpQTZvTTJWcnN5c18xV3N1TGF3QlJWZGRia2lPc3BhY1RPQTZyejN2ZmMzeE5xb2NJUVhxcFV2SjFMVHNjZFNYZGhZcU9vcGRFOVdYUVFVUGRCX1F3dlBSUEZNT2FocUhHaU9DM2RodW1pMGlJemZUNUthMHR5RzNoMndKejYyZWx4MTc3SDRJcHhKZnVhUjNPaWZMM05XSXBzcDdDS0Z4VHA0SlFVTmhndDV6b2llY1RqR2tmVXZwQ2JKUWFadWtvYjNCOENyRW9kUnI0N1ZxWWltYUUzMEZ6RmtSSXlyVE5YbWtIYWtRanRIY1ZEWndjdms?oc=5"
-              }
-            ],
-            "spacing": "None"
           },
           {
             "type": "TextBlock",
@@ -97,28 +73,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 20.0s — 3103 résultats, 5 erreurs",
+            "text": "✅ T01 — Collecte RSS · 3.0s — 140 résultats, 0 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 127.0s — 420 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 130.0s — 421 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 38.0s — 1172 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage · 1.0s — 303 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 19 pertinents / 471 à vérifier / 682 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 16 pertinents / 219 à vérifier / 68 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -132,7 +108,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 2011.0s — 440 candidats traités",
+            "text": "✅ T01 — Analyse IA · 289.0s — 199 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -146,14 +122,14 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Statistiques opérateurs — 48 opérateurs mesurés",
+            "text": "✅ T01 — Statistiques opérateurs — 6 opérateurs mesurés",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Sauvegarde CSV · 1.0s — CSV principaux + audits enregistrés",
+            "text": "✅ T01 — Sauvegarde CSV — CSV principaux + audits enregistrés",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -187,12 +163,6 @@
           },
           {
             "type": "TextBlock",
-            "text": "enseignement supérieur — 362 uniques · 0 pertinents · 1 à vérifier",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
             "text": "source:site_officiel — 80 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
@@ -205,13 +175,19 @@
           },
           {
             "type": "TextBlock",
-            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
+            "text": "source:bing_news — 6 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "forum recrutement — 4 uniques · 0 pertinents · 0 à vérifier",
+            "text": "salon étudiant — 7 uniques · 0 pertinents · 0 à vérifier",
+            "wrap": true,
+            "spacing": "None"
+          },
+          {
+            "type": "TextBlock",
+            "text": "forum entreprises — 1 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -224,7 +200,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "IA : 22 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
+            "text": "IA : 2 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
             "isSubtle": true,
             "wrap": true,
             "spacing": "Medium"

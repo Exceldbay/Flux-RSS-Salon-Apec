@@ -1,49 +1,7 @@
 ﻿operateur,famille,resultats_bruts,uniques,pertinents,a_verifier,non_pertinents,utiles,taux_utilite,taux_pertinent
-enseignement supérieur,legacy,470,362,0,1,248,1,0.3,0.0
 source:site_officiel,legacy,82,80,0,0,28,0,0.0,0.0
-source:openagenda,legacy,331,331,0,0,25,0,0.0,0.0
-source:bing_news,legacy,7,5,0,0,2,0,0.0,0.0
-forum recrutement,legacy,8,4,0,0,7,0,0.0,0.0
-alumni,legacy,7,7,0,0,4,0,0.0,0.0
-emploi cadre,legacy,8,6,0,0,6,0,0.0,0.0
-forum formation,legacy,5,4,0,0,1,0,0.0,0.0
-job dating,legacy,303,223,0,0,111,0,0.0,0.0
-salon recrutement,legacy,1,1,0,0,0,0,0.0,0.0
-études supérieures,legacy,273,196,0,0,133,0,0.0,0.0
-forum emploi,legacy,114,58,0,0,46,0,0.0,0.0
-semaine de l'emploi,legacy,23,16,0,0,9,0,0.0,0.0
-forum alumni,legacy,1,1,0,0,0,0,0.0,0.0
-salons et forums,legacy,6,4,0,0,2,0,0.0,0.0
-salon étudiant,legacy,24,16,0,0,11,0,0.0,0.0
-portes ouvertes,legacy,20,11,0,0,6,0,0.0,0.0
-salon emploi,legacy,14,6,0,0,7,0,0.0,0.0
-salon formation,legacy,57,20,0,0,28,0,0.0,0.0
-forum entreprises,legacy,1,1,0,0,1,0,0.0,0.0
-forum alternance,legacy,2,1,0,0,0,0,0.0,0.0
-"""forum entreprises"" ""master""",legacy,2,2,0,0,0,0,0.0,0.0
-"""forum entreprises"" ""diplômés""",legacy,9,7,0,0,1,0,0.0,0.0
-"""forum entreprises"" ""ingénieurs""",legacy,24,18,0,0,2,0,0.0,0.0
-"""job dating"" ""cadres""",legacy,7,6,0,0,4,0,0.0,0.0
-"""rencontre entreprises"" ""université""",legacy,77,56,0,0,26,0,0.0,0.0
-"""forum entreprises"" ""université""",legacy,41,27,0,0,21,0,0.0,0.0
-"""rencontre entreprises"" ""master""",legacy,43,38,0,0,20,0,0.0,0.0
-"""rencontre entreprises"" ""diplômés""",legacy,13,11,0,0,8,0,0.0,0.0
-"""rencontre entreprises"" ""ingénieurs""",legacy,36,29,0,0,13,0,0.0,0.0
-"""job dating"" ""jeunes diplômés""",legacy,30,24,0,0,8,0,0.0,0.0
-"""job dating"" ""ingénieurs""",legacy,13,8,0,0,1,0,0.0,0.0
-"""forum emploi"" ""master""",legacy,4,4,0,0,0,0,0.0,0.0
-"""forum emploi"" ""université""",legacy,35,24,0,0,14,0,0.0,0.0
-"""forum emploi"" ""ingénieurs""",legacy,19,13,0,0,4,0,0.0,0.0
-"""forum emploi"" ""grande école""",legacy,30,26,0,0,10,0,0.0,0.0
-"""recrutement"" ""cadres""",legacy,5,2,0,0,5,0,0.0,0.0
-"""recrutement"" ""jeunes diplômés""",legacy,67,54,0,0,27,0,0.0,0.0
-"""forum entreprises"" site:apec.fr",legacy,9,5,0,0,0,0,0.0,0.0
-"""premier emploi"" ""diplômés""",legacy,59,48,0,0,27,0,0.0,0.0
-"""forum entreprises"" site:francetravail.fr",legacy,551,132,0,0,102,0,0.0,0.0
-"""forum entreprises"" site:data.gouv.fr",legacy,159,63,0,0,89,0,0.0,0.0
-"""forum entreprises"" site:unilim.fr",legacy,208,72,0,0,35,0,0.0,0.0
-"""objectif premier emploi"" ""université""",legacy,40,31,0,0,9,0,0.0,0.0
-"""rencontre employeurs"" ""université""",legacy,7,6,0,0,0,0,0.0,0.0
-"""relations entreprises"" ""université""",legacy,68,55,0,0,21,0,0.0,0.0
-"""forum entreprises"" site:univ-poitiers.fr",legacy,146,46,0,0,12,0,0.0,0.0
-"""forum entreprises"" site:univ-larochelle.fr",legacy,64,25,0,0,13,0,0.0,0.0
+source:openagenda,legacy,331,331,0,0,24,0,0.0,0.0
+source:bing_news,legacy,8,6,0,0,2,0,0.0,0.0
+salon étudiant,legacy,9,7,0,0,1,0,0.0,0.0
+forum entreprises,legacy,1,1,0,0,0,0,0.0,0.0
+forum emploi,legacy,130,87,0,0,23,0,0.0,0.0
