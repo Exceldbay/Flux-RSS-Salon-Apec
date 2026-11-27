@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v43-cadrage-apec-3x31-plus1x38"
+IA_RULES_VERSION = "v44-preuve-contradiction-apec-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -324,7 +324,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v43-cadrage-apec"
+VERSION_PROGRAMME = "2026-11-27-v44-preuve-contradiction-apec"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -2234,6 +2234,209 @@ DOMAINES_SOURCE_INSTITUTIONNELLE = [
 
 
 
+
+# ============================================================
+# V44 — GRILLE DE DÉCISION APEC + PREUVE OBLIGATOIRE
+# ============================================================
+
+def appliquer_grille_decision_apec_v44(candidat):
+    """Applique une grille déterministe après les tours Gemini.
+
+    Principe : PERTINENT exige à la fois une cible Apec identifiable,
+    une mission Apec identifiable et une preuve concrète. Sinon, on
+    rétrograde vers A_VERIFIER. Les exclusions fortes restent prioritaires.
+    """
+    texte = normalise(" ".join([
+        str(candidat.get("titre", "") or ""),
+        str(candidat.get("description", "") or ""),
+        str(candidat.get("contenu_page", "") or "")[:16000],
+        str(candidat.get("lieu_page", "") or ""),
+        str(candidat.get("organisateur_page", "") or ""),
+    ]))
+
+    publics = list(candidat.get("apec_publics_detectes_v43", []) or [])
+    missions = list(candidat.get("apec_missions_detectees_v43", []) or [])
+    exclusions = list(candidat.get("apec_exclusions_detectees_v43", []) or [])
+
+    # Preuves structurées déjà produites par V42/V43.
+    try:
+        niveau_preuve = int(candidat.get("niveau_preuve", candidat.get("niveau_preuve_v42", 0)) or 0)
+    except Exception:
+        niveau_preuve = 0
+
+    preuve_cible = str(
+        candidat.get("preuve_cible", candidat.get("preuve_cible_v42", "")) or ""
+    ).upper()
+    preuve_evenement = str(
+        candidat.get("preuve_evenement_v42", candidat.get("preuve_evenement", "")) or ""
+    ).upper()
+
+    # Preuve explicite d'une mission Apec : pas seulement le mot "emploi".
+    mission_directe = [
+        x for x in APEC_MISSIONS_FORTES
+        if normalise(x) in texte
+    ]
+    public_direct = [
+        x for x in APEC_PUBLICS_FORTS
+        if normalise(x) in texte
+    ]
+
+    # Exclusions fortes explicites.
+    exclusion_directe = [
+        x for x in APEC_EXCLUSIONS_FORTES
+        if normalise(x) in texte
+    ]
+
+    # Niveau de preuve de cible.
+    if public_direct or publics:
+        preuve_public = "FORTE"
+    elif any(term in texte for term in ("étudiants", "etudiants", "formation", "universite", "université")):
+        preuve_public = "FAIBLE"
+    else:
+        preuve_public = "ABSENTE"
+
+    if mission_directe or missions:
+        preuve_mission = "FORTE"
+    elif any(term in texte for term in ("emploi", "recrutement", "entreprise", "entreprises")):
+        preuve_mission = "FAIBLE"
+    else:
+        preuve_mission = "ABSENTE"
+
+    # Public réellement qualifié.
+    if any(normalise(x) in texte for x in (
+        "cadre", "cadres", "manager", "managers", "dirigeant", "dirigeants",
+        "bac+5", "bac +5", "master", "mba", "doctorat", "doctorant",
+        "jeune diplômé", "jeunes diplômés", "alumni", "expert", "ingénieur",
+        "ingénieurs",
+    )):
+        niveau_qualification = "QUALIFIE_APEC"
+    elif any(normalise(x) in texte for x in (
+        "étudiant", "étudiants", "enseignement supérieur", "études supérieures",
+        "université", "école d'ingénieurs", "école de commerce",
+    )):
+        niveau_qualification = "SUPERIEUR_A_CONFIRMER"
+    elif exclusion_directe:
+        niveau_qualification = "HORS_CIBLE"
+    else:
+        niveau_qualification = "INCONNU"
+
+    # Dimension entreprise/recrutement.
+    if any(normalise(x) in texte for x in (
+        "recruteur", "recruteurs", "recrutement", "employeur", "employeurs",
+        "rencontre entreprises", "forum entreprises", "job dating",
+        "relations entreprises", "career day", "emploi cadre",
+    )):
+        dimension_entreprise = "FORTE"
+    elif any(term in texte for term in ("emploi", "entreprise", "entreprises")):
+        dimension_entreprise = "MOYENNE"
+    else:
+        dimension_entreprise = "ABSENTE"
+
+    # Une preuve événementielle réelle est nécessaire pour PERTINENT.
+    preuve_concrete = (
+        niveau_preuve >= 2
+        or preuve_evenement == "OUI"
+        or candidat.get("preuve_verifiee_v42") is True
+        or bool(candidat.get("date_evenement_page"))
+    )
+
+    cible_forte = preuve_public == "FORTE" and niveau_qualification == "QUALIFIE_APEC"
+    mission_forte = preuve_mission == "FORTE" and dimension_entreprise in {"FORTE", "MOYENNE"}
+
+    # Exception contrôlée pour les événements du supérieur : ils peuvent être
+    # pertinents même sans mention explicite "cadre" si le niveau Bac+3/Bac+5,
+    # alumni ou relation entreprises est clairement établi.
+    superieur_apec = (
+        preuve_public == "FORTE"
+        and any(normalise(x) in texte for x in (
+            "bac+3", "bac +3", "bac+5", "bac +5", "master", "alumni",
+            "école d'ingénieurs", "école de commerce", "grande école",
+            "enseignement supérieur",
+        ))
+        and dimension_entreprise in {"FORTE", "MOYENNE"}
+    )
+
+    # Décision déterministe.
+    if exclusion_directe:
+        decision = "NON_PERTINENT"
+        motif = "Exclusion forte détectée : " + ", ".join(exclusion_directe[:5])
+    elif (cible_forte or superieur_apec) and mission_forte and preuve_concrete:
+        decision = "PERTINENT"
+        motif = "Cible Apec + mission Apec + preuve concrète réunies."
+    elif (preuve_public != "ABSENTE" or preuve_mission != "ABSENTE") and (mission_forte or cible_forte):
+        decision = "A_VERIFIER"
+        motif = "Signal Apec réel mais preuve insuffisante pour confirmer la pertinence."
+    else:
+        decision = "A_VERIFIER"
+        motif = "Preuve Apec insuffisante : absence de cible et/ou mission clairement démontrée."
+
+    # La grille ne doit jamais produire de score négatif.
+    candidat["score"] = max(0, int(candidat.get("score", 0) or 0))
+    candidat["public_cible_v44"] = "; ".join(public_direct or publics[:10])
+    candidat["mission_apec_v44"] = "; ".join(mission_directe or missions[:10])
+    candidat["niveau_qualification_v44"] = niveau_qualification
+    candidat["dimension_entreprise_v44"] = dimension_entreprise
+    candidat["preuve_public_v44"] = preuve_public
+    candidat["preuve_mission_v44"] = preuve_mission
+    candidat["preuves_concretes_v44"] = "OUI" if preuve_concrete else "NON"
+    candidat["decision_v44"] = decision
+    candidat["motif_decision_v44"] = motif
+    candidat["contre_argument_v44"] = candidat.get(
+        "contre_argument_31_t3",
+        candidat.get("contre_preuve_31_t2", "")
+    )
+
+    return candidat
+
+
+def arbitrer_coherence_v44(candidat):
+    """Arbitrage final après Gemini 3.8, sans laisser l'IA contourner la grille."""
+    grille = candidat.get("decision_v44", "A_VERIFIER")
+    decision38 = str(candidat.get("decision_ia_38", "") or "").upper()
+    arbitrage38 = str(candidat.get("arbitrage_38", "") or "").upper()
+
+    if grille == "NON_PERTINENT":
+        final = "NON_PERTINENT"
+        raison = candidat.get("motif_decision_v44", "Exclusion déterministe.")
+    elif grille == "A_VERIFIER":
+        # Même si 3.8 dit pertinent, absence de preuve = pas de confirmation.
+        final = "A_VERIFIER"
+        raison = candidat.get("motif_decision_v44", "Preuve insuffisante.")
+    else:
+        # PERTINENT déterministe : 3.8 peut confirmer ou rétrograder, jamais
+        # inventer une pertinence supérieure à la preuve disponible.
+        if arbitrage38 == "REJETER" or decision38 == "NON_PERTINENT":
+            final = "A_VERIFIER"
+            raison = str(candidat.get("raison_ia_38", "") or "3.8 a identifié une contradiction.")
+        elif arbitrage38 == "RETROGRADER" or decision38 == "A_VERIFIER":
+            final = "A_VERIFIER"
+            raison = str(candidat.get("raison_ia_38", "") or "3.8 demande une vérification.")
+        else:
+            final = "PERTINENT"
+            raison = str(
+                candidat.get("raison_ia_38")
+                or candidat.get("raison_ia_31_t3")
+                or candidat.get("motif_decision_v44")
+                or ""
+            )
+
+    candidat["decision_ia"] = final
+    candidat["decision_finale_v44"] = final
+    candidat["raison_ia"] = raison
+    candidat["confiance_ia"] = max(
+        0,
+        min(
+            100,
+            int(
+                candidat.get("confiance_ia_38")
+                if decision38 and candidat.get("confiance_ia_38") is not None
+                else candidat.get("confiance_ia_31_t3", candidat.get("confiance_ia_1", 0))
+            ) or 0,
+        ),
+    )
+    return candidat
+
+
 def parser_date_evenement(valeur):
     """Extrait une date ISO/FR simple depuis les métadonnées de page."""
     t = str(valeur or "").strip()
@@ -3425,6 +3628,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         r["decision_ia"] = decision_coherente
         r["arbitrage_coherence"] = motif_coherence
         classer_statut_final(r, r["decision_ia"])
+        appliquer_grille_decision_apec_v44(r)
         t3_ok.append(r)
 
     # Sélection intelligente : pertinence + incertitude + désaccord, pas score Python seul.
