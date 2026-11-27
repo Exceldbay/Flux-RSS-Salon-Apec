@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -156,6 +156,9 @@ LAST_IA_STATS = {
     "appels_38": 0,
     "candidats_analyzes": 0,
     "memoire_reutilisee": 0,
+    "sources_decouverte": 0,
+    "candidats_decouverts": 0,
+    "candidats_perdus_reconciliation": 0,
     "geo_bloques": 0,
     "quota_bloque": False,
 }
@@ -2433,6 +2436,98 @@ def calculer_score(resultat):
 
 
 
+
+# ============================================================
+# SOURCES DE DÉCOUVERTE — V40
+# ============================================================
+MOTS_SOURCE_DECOUVERTE = {
+    "insertion professionnelle", "orientation et insertion", "orientation & insertion",
+    "stages et emplois", "emploi et carrière", "emploi et formation",
+    "rencontrer et recruter", "rencontrer nos étudiants", "recruter nos étudiants",
+    "entreprises, partenaires", "entreprises partenaires", "club des partenaires",
+    "réseau alumni", "association des anciens", "débouchés métiers",
+    "débouchés et insertion", "accompagner les entreprises", "participer à des salons",
+    "salons, manifestations et évènements", "carrière et compétences",
+    "événements orientation et insertion", "orientation et insertion archives",
+}
+
+def _url_http(resultat):
+    url = str(resultat.get("url_finale") or resultat.get("url_reelle") or resultat.get("url") or "").strip()
+    return url if url.startswith(("http://", "https://")) else ""
+
+def _est_source_decouverte(resultat):
+    texte = normaliser(" ".join(str(resultat.get(k, "")) for k in (
+        "titre", "description", "titre_page", "description_page", "extrait_page"
+    )))
+    titre = normaliser(resultat.get("titre_page") or resultat.get("titre", ""))
+    if not texte or not any(x in texte for x in MOTS_SOURCE_DECOUVERTE):
+        return False
+    signaux_event = [x for x in EVENT_SIGNAL_CIBLE if x in titre]
+    preuve = any(x in texte for x in EVENT_PREUVE_FORTE)
+    if signaux_event and (preuve or resultat.get("date_evenement_page") or resultat.get("lieu_page")):
+        return False
+    return True
+
+def extraire_evenements_sources_decouverte(sources):
+    """Utilise les pages institutionnelles comme index, pas comme candidats."""
+    decouverte = [dict(r, type_source="SOURCE_DECOUVERTE", source_decouverte="OUI")
+                  for r in sources if _est_source_decouverte(r) and _url_http(r)]
+    if not decouverte:
+        return [], []
+    mots_event = set(EVENT_SIGNAL_CIBLE) | set(EVENT_PREUVE_FORTE) | {
+        "career day", "career forum", "forum entreprises", "rencontres entreprises",
+        "rencontre entreprises", "job dating", "forum alternance", "journée entreprises",
+        "journée carrières", "semaine de l'emploi", "premier emploi", "alumni",
+        "portes ouvertes", "salon étudiant", "forum étudiant", "2027", "2028",
+    }
+    def worker(parent):
+        url = _url_http(parent)
+        out = []
+        try:
+            response = requests.get(url, timeout=min(TIMEOUT, 12),
+                                    headers={"User-Agent": "Mozilla/5.0 (compatible; ApecVeille/40)"})
+            if response.status_code >= 400:
+                return out
+            soup = BeautifulSoup(response.text, "html.parser")
+            for a in soup.find_all("a", href=True):
+                label = normaliser(a.get_text(" ", strip=True))
+                href = str(a.get("href", "")).strip()
+                blob = normaliser(label + " " + href)
+                if len(label) < 6 or not any(m in blob for m in mots_event):
+                    continue
+                if any(x in blob for x in EXCLUSIONS_FORTES):
+                    continue
+                lien = urljoin(response.url, href)
+                if not lien.startswith(("http://", "https://")) or lien.rstrip("/") == url.rstrip("/"):
+                    continue
+                enfant = dict(parent)
+                enfant.update({
+                    "titre": label[:500], "titre_page": label[:500],
+                    "url": lien, "url_reelle": lien, "url_finale": lien,
+                    "origine_collecte": "decouverte",
+                    "type_source": "EVENEMENT_DECOUVERT",
+                    "source_decouverte_parent": url,
+                    "description": (str(parent.get("description", "")) + " | Découvert depuis : " + url)[:5000],
+                })
+                out.append(enfant)
+                if len(out) >= 30:
+                    break
+        except Exception:
+            return []
+        return out
+    enfants=[]
+    with ThreadPoolExecutor(max_workers=min(16, max(4, len(decouverte)))) as pool:
+        futures=[pool.submit(worker,r) for r in decouverte]
+        for f in futures:
+            try: enfants.extend(f.result())
+            except Exception: pass
+    uniques={}
+    for r in enfants:
+        cle=canoniser_url(r.get("url")) or _cle_stable_candidat(r)
+        if cle and cle not in uniques: uniques[cle]=r
+    return decouverte, list(uniques.values())
+
+
 def filtrer_candidats_avant_scoring(resultats):
     """V36 : filtre de sécurité à haute précision sans tuer le rappel.
 
@@ -2932,7 +3027,9 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         c.update(geo2)
         geo_fort_ok, geo_fort_motif, geo_fort_code = verifier_geographie_inviolable(c)
         c["ia_preanalyse"] = "OUI"
-        if (not geo_fort_ok) or geo2.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+        # V40 : la pré-analyse géographique IA est informative. Le seul verrou
+        # dur ici est la vérification géographique indépendante et explicite.
+        if not geo_fort_ok:
             c.update({
                 "ia_preexclusion_geo": "OUI",
                 "decision_ia": "NON_PERTINENT",
@@ -4180,6 +4277,9 @@ def generer_rapport_pdf_unique(
         [cell("Décisions IA réelles"), cell(audit.get("resultats_ia_reels", 0))],
         [cell("Réutilisations BDD"), cell(audit.get("ia_reutilises_bdd", 0))],
         [cell("Réutilisations mémoire IA"), cell(audit.get("ia_reutilises_memoire", 0))],
+        [cell("Sources de découverte"), cell(audit.get("sources_decouverte", 0))],
+        [cell("Événements découverts"), cell(audit.get("candidats_decouverts", 0))],
+        [cell("Candidats perdus — réconciliation"), cell(audit.get("candidats_perdus_reconciliation", 0))],
         [cell("Pertinents finaux"), cell(audit.get("pertinents_final", len(pertinents)))],
         [cell("À vérifier finaux"), cell(audit.get("a_verifier_final", len(a_verifier)))],
         [cell("Non pertinents finaux"), cell(audit.get("non_pertinents_final", len(non_pertinents)))],
@@ -4219,6 +4319,9 @@ def generer_rapport_pdf_unique(
         ("Décisions IA réelles", "resultats_ia_reels"),
         ("Réutilisations BDD", "ia_reutilises_bdd"),
         ("Réutilisations mémoire IA", "ia_reutilises_memoire"),
+        ("Sources de découverte", "sources_decouverte"),
+        ("Événements découverts", "candidats_decouverts"),
+        ("Candidats perdus — réconciliation", "candidats_perdus_reconciliation"),
     ]:
         audit_lignes.append([cell(lib), cell(audit.get(cle, 0))])
     if motifs_audit:
@@ -4426,12 +4529,25 @@ def main():
         _r.setdefault("origine_collecte", "rss")
 
     # --------------------------------------------------------
-    # FILTRE V36 AVANT TOUT SCORING
+    # V40 — SOURCES DE DÉCOUVERTE
+    # --------------------------------------------------------
+    sources_decouverte, candidats_decouverts = extraire_evenements_sources_decouverte(externes)
+    AUDIT_PIPELINE["sources_decouverte"] = len(sources_decouverte)
+    AUDIT_PIPELINE["candidats_decouverts"] = len(candidats_decouverts)
+    print(f"🔎 Sources de découverte : {len(sources_decouverte)} | événements enfants : {len(candidats_decouverts)}")
+
+    # Une page institutionnelle de navigation n'est plus un candidat.
+    # Seuls ses événements enfants éventuels rejoignent la collecte.
+    resultats_collectes = candidats_decouverts + resultats_bruts + [
+        r for r in externes if not _est_source_decouverte(r)
+    ]
+
+    # --------------------------------------------------------
+    # FILTRE V40 AVANT TOUT SCORING
     # --------------------------------------------------------
     # Les sources externes et RSS sont filtrées ensemble, mais les compteurs
     # de provenance sont conservés séparément. Les contenus manifestement
     # hors sujet ne deviennent jamais des « candidats » de la veille.
-    resultats_collectes = externes + resultats_bruts
     nb_resultats_collectes_bruts = len(resultats_collectes)
     AUDIT_PIPELINE["total_brut"] = nb_resultats_collectes_bruts
     resultats_bruts, rejets_pretraitement, motifs_pretraitement = filtrer_candidats_avant_scoring(resultats_collectes)
@@ -4488,6 +4604,19 @@ def main():
     AUDIT_PIPELINE["ia_reutilises_bdd"] = LAST_IA_STATS.get("bdd_reutilises", 0)
     AUDIT_PIPELINE["ia_reutilises_memoire"] = LAST_IA_STATS.get("memoire_reutilisee", 0)
     AUDIT_PIPELINE["ia_a_traiter_reellement"] = LAST_IA_STATS.get("a_traiter_reellement", 0)
+
+    # V40 — aucune disparition silencieuse entre entrée IA et destinations.
+    entree_ia = AUDIT_PIPELINE.get("candidats_ia_entree", 0)
+    bdd_r = LAST_IA_STATS.get("bdd_reutilises", 0)
+    mem_r = LAST_IA_STATS.get("memoire_reutilisee", 0)
+    gem_r = LAST_IA_STATS.get("a_traiter_reellement", 0)
+    geo_r = LAST_IA_STATS.get("geo_bloques", 0)
+    total_reconcilie = bdd_r + mem_r + gem_r + geo_r
+    AUDIT_PIPELINE["candidats_perdus_reconciliation"] = max(0, entree_ia - total_reconcilie)
+    if entree_ia == total_reconcilie:
+        print(f"✅ V40 RÉCONCILIATION : {entree_ia} = {total_reconcilie}")
+    else:
+        print(f"⚠️ V40 RÉCONCILIATION : entrée={entree_ia} | BDD={bdd_r} | mémoire={mem_r} | Gemini={gem_r} | geo={geo_r} | perdus={AUDIT_PIPELINE['candidats_perdus_reconciliation']}")
 
     # ========================================================
     # DELTA D'AFFICHAGE — UNIQUEMENT NOUVEAUX / MODIFIÉS
