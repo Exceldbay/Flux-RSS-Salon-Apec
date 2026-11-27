@@ -1,6 +1,6 @@
 ﻿operateur,famille,resultats_bruts,uniques,pertinents,a_verifier,non_pertinents,utiles,taux_utilite,taux_pertinent
-source:site_officiel,legacy,24,22,0,0,7,0,0.0,0.0
+source:openagenda,legacy,176,176,2,66,0,68,38.6,1.1
+source:bing_news,legacy,5,4,2,1,0,3,75.0,50.0
+forum emploi,legacy,22,15,0,1,1,1,6.7,0.0
+source:site_officiel,legacy,24,22,0,1,2,1,4.5,0.0
 salon étudiant,legacy,4,2,0,0,0,0,0.0,0.0
-forum emploi,legacy,22,15,0,0,1,0,0.0,0.0
-source:openagenda,legacy,176,176,0,0,0,0,0.0,0.0
-source:bing_news,legacy,6,5,0,0,0,0,0.0,0.0
