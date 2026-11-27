@@ -1107,10 +1107,45 @@ def construire_requetes(departements):
                     "famille_operateur": "source_institutionnelle",
                 })
 
-    # Dernier garde-fou : aucune requête hors des 7 départements ne sort de
-    # construire_requetes(). Cela protège aussi les configurations YAML futures.
-    requetes = [r for r in requetes if valider_requete_geographique(r)]
-    return requetes
+    # ------------------------------------------------------------
+    # NORMALISATION + DEDOUBLONNAGE DES PRE-REQUETES
+    # ------------------------------------------------------------
+    # Une même recherche pouvait être générée plusieurs fois par les
+    # différentes familles d'opérateurs. On déduplique avant tout appel
+    # réseau, tout en conservant la première occurrence (ordre prioritaire).
+    requetes_valides = []
+    signatures_vues = set()
+
+    for requete in requetes:
+        if not valider_requete_geographique(requete):
+            continue
+
+        requete["geo_recherche"] = construire_bloc_geo_recherche(requete)
+
+        signature = (
+            str(requete.get("departement", "")).strip(),
+            str(requete.get("annee", "")).strip(),
+            normaliser(requete.get("mot_cle", "")),
+            normaliser(requete.get("complement", "")),
+            normaliser(requete.get("lieu", "")),
+            normaliser(requete.get("geo_recherche", "")),
+            str(requete.get("operateur_web", "")).strip(),
+            str(requete.get("famille_operateur", "")).strip(),
+        )
+
+        if signature in signatures_vues:
+            continue
+
+        signatures_vues.add(signature)
+        requete["id_requete"] = f"Q{len(requetes_valides) + 1:05d}"
+        requetes_valides.append(requete)
+
+    print(
+        f"Pré-requêtes : {len(requetes)} générées -> "
+        f"{len(requetes_valides)} uniques et géographiquement valides"
+    )
+
+    return requetes_valides
 
 
 # ============================================================
@@ -1189,7 +1224,8 @@ def rechercher_google_news(requete):
                     "categorie": requete["categorie"],
                     "mot_cle": requete["mot_cle"],
                     "lieu": requete.get("lieu", ""),
-                    "geo_recherche": construire_bloc_geo_recherche(requete),
+                    "geo_recherche": requete.get("geo_recherche") or construire_bloc_geo_recherche(requete),
+                    "id_requete": requete.get("id_requete", ""),
                 })
 
             enregistrer_log_recherche(
