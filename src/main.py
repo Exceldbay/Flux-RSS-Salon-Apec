@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v44-preuve-contradiction-apec-3x31-plus1x38"
+IA_RULES_VERSION = "v44-filtre-apec-strict-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -324,7 +324,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v44-preuve-contradiction-apec"
+VERSION_PROGRAMME = "2026-11-27-v44-filtre-apec-strict"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -2239,6 +2239,124 @@ DOMAINES_SOURCE_INSTITUTIONNELLE = [
 # V44 — GRILLE DE DÉCISION APEC + PREUVE OBLIGATOIRE
 # ============================================================
 
+# ============================================================
+# V44 — FILTRE APEC STRICT AVANT GEMINI
+# ============================================================
+
+APEC_BRUIT_FORT_V44 = [
+    "cpf", "mission locale", "missions locales",
+    "interim", "intérim", "job saisonnier", "jobs saisonniers",
+    "emploi saisonnier", "travail saisonnier", "jobs étudiants",
+    "job étudiant", "petits boulots", "carsat", "retraite",
+    "urssaf", "acre", "inpi", "permanence", "permanences",
+    "information collective", "atelier france travail",
+    "france travail et vous", "chantier d'insertion",
+    "association aide à l'emploi", "aide à l'emploi",
+    "stade vers l'emploi", "orientation post-3e", "post-3e", "post 3e",
+]
+
+APEC_CIBLES_QUALIFIEES_V44 = [
+    "cadre", "cadres", "cadre dirigeant", "cadres dirigeants",
+    "manager", "managers", "dirigeant", "dirigeants",
+    "ingénieur", "ingenieur", "ingénieurs", "ingenieurs",
+    "expert", "experts", "jeune diplômé", "jeunes diplômés",
+    "jeune diplome", "jeunes diplomes", "bac+3", "bac +3",
+    "bac+5", "bac +5", "master", "mba", "doctorant", "doctorants",
+    "docteur", "docteurs", "doctorat", "alumni", "anciens élèves",
+    "anciens eleves", "enseignement supérieur", "enseignement superieur",
+    "études supérieures", "etudes superieures",
+    "école d'ingénieurs", "ecole d'ingenieurs",
+    "école de commerce", "ecole de commerce",
+    "grande école", "grandes écoles", "iae",
+]
+
+APEC_MISSIONS_QUALIFIEES_V44 = [
+    "recrutement de cadres", "recrutement cadre", "recrutement cadres",
+    "recrutement de profils cadres", "emploi cadre", "emploi cadres",
+    "emplois cadres", "recrutement de jeunes diplômés",
+    "recrutement jeunes diplômés", "rencontre recruteurs",
+    "rencontre entreprises", "forum entreprises", "forum entreprise",
+    "career day", "job dating", "relations entreprises",
+    "relation entreprises", "mobilité professionnelle",
+    "mobilite professionnelle", "évolution professionnelle",
+    "evolution professionnelle", "reconversion professionnelle",
+    "carrière", "carriere", "accompagnement professionnel",
+]
+
+def filtrer_apec_strict_v44(candidat):
+    """Barrière anti-bruit avant Gemini."""
+    texte = normalise(" ".join([
+        str(candidat.get("titre", "") or ""),
+        str(candidat.get("description", "") or ""),
+        str(candidat.get("contenu_page", "") or "")[:18000],
+        str(candidat.get("organisateur_page", "") or ""),
+        str(candidat.get("lieu_page", "") or ""),
+    ]))
+
+    cible = [x for x in APEC_CIBLES_QUALIFIEES_V44 if normalise(x) in texte]
+    mission = [x for x in APEC_MISSIONS_QUALIFIEES_V44 if normalise(x) in texte]
+    bruit = [x for x in APEC_BRUIT_FORT_V44 if normalise(x) in texte]
+
+    saisonnier = any(x in texte for x in (
+        "saisonnier", "saisonniers", "emploi saisonnier", "emplois saisonniers"
+    ))
+    lycee = any(x in texte for x in (
+        "lycéen", "lycéens", "lycee", "lycée",
+        "collégien", "collégiens", "college", "collège",
+        "post-3e", "post 3e"
+    ))
+
+    # Le mot recrutement seul ne suffit pas.
+    recrutement_generique = "recrutement" in texte and not mission and not cible
+
+    if saisonnier and not cible:
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "EMPLOI_SAISONNIER"
+        return False
+
+    if lycee and not any(x in texte for x in (
+        "cadre", "cadres", "ingénieur", "ingenieur", "manager",
+        "jeune diplômé", "jeunes diplômés", "bac+5", "master",
+    )):
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "PUBLIC_LYCEE"
+        return False
+
+    if bruit and not cible:
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "BRUIT_GENERALISTE"
+        return False
+
+    generique = any(x in texte for x in (
+        "orientation", "formation", "emploi", "recherche d'emploi",
+        "recherche emploi", "atelier", "information collective",
+    ))
+    if generique and not cible and not mission:
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "SIGNAL_APEC_INSUFFISANT"
+        return False
+
+    if recrutement_generique:
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "RECRUTEMENT_TROP_GENERIQUE"
+        return False
+
+    if not cible and not mission:
+        candidat["filtre_apec_v44"] = "REJETE_BRUIT"
+        candidat["motif_filtre_apec_v44"] = "AUCUN_SIGNAL_APEC_FORT"
+        return False
+
+    candidat["filtre_apec_v44"] = "PASSE_IA"
+    candidat["motif_filtre_apec_v44"] = (
+        "Cible Apec : " + ", ".join(cible[:5])
+        + (" | Mission : " + ", ".join(mission[:5]) if mission else "")
+    )
+    candidat["signal_cible_apec_v44"] = "; ".join(cible[:20])
+    candidat["signal_mission_apec_v44"] = "; ".join(mission[:20])
+    candidat["signal_bruit_apec_v44"] = "; ".join(bruit[:20])
+    return True
+
+
 def appliquer_grille_decision_apec_v44(candidat):
     """Applique une grille déterministe après les tours Gemini.
 
@@ -3538,6 +3656,17 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         print(f"🧭 V43 — cadrage mission Apec : {len(a_traiter)} candidats")
         for candidat in a_traiter:
             cadrer_apec_avant_ia(candidat)
+
+    # V44 : barrière anti-bruit AVANT toute consommation Gemini.
+    candidats_avant_filtre_v44 = list(a_traiter)
+    a_traiter = [
+        candidat for candidat in a_traiter
+        if filtrer_apec_strict_v44(candidat)
+    ]
+    print(
+        f"🛡️ V44 — filtre Apec strict : {len(a_traiter)} candidats IA / "
+        f"{len(candidats_avant_filtre_v44) - len(a_traiter)} rejets anti-bruit"
+    )
 
     if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
         a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
