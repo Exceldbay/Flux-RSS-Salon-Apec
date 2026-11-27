@@ -8,129 +8,126 @@ on:
 permissions:
   contents: write
 
+# Un seul workflow de veille écrit sur main à la fois.
+concurrency:
+  group: veille-apec-main
+  cancel-in-progress: false
+
 jobs:
-  veille-apec:
+  recherche:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL_31: "gemini-3.1-flash-lite"
+      GEMINI_MODEL_38: "gemini-3.8-flash"
 
     steps:
-      - name: Checkout du dépôt
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Installation de Python 3.12
+      - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Installation des dépendances
+      - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Vérification des secrets
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
+      - name: Afficher la configuration IA
         run: |
-          echo "=== VÉRIFICATION DES SECRETS ==="
-          if [ -n "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY : présente"; else echo "GEMINI_API_KEY : absente"; fi
-          if [ -n "$TEAMS_PRIVATE_WEBHOOK_URL" ]; then echo "TEAMS_PRIVATE_WEBHOOK_URL : présente"; else echo "TEAMS_PRIVATE_WEBHOOK_URL : absente"; fi
+          echo "========================================"
+          echo "CONFIGURATION GEMINI"
+          echo "========================================"
+          echo "Modèle base           : $GEMINI_MODEL_31"
+          echo "Modèle enrichissement : $GEMINI_MODEL_38"
+          echo "3.1                   : illimité"
+          echo "3.8                   : selon configuration du programme"
 
-      - name: Lancement de la veille APEC
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TEAMS_PRIVATE_WEBHOOK_URL: ${{ secrets.TEAMS_PRIVATE_WEBHOOK_URL }}
-          PYTHONUNBUFFERED: "1"
+      - name: Lancer le programme
         run: |
-          echo "=== VEILLE APEC ==="
-          echo "Date : $(date '+%d/%m/%Y %H:%M:%S')"
-          python src/main.py
+          python -u src/main.py
 
-      - name: Détection du rapport PDF final
-        id: rapport
-        if: always()
-        shell: bash
-        run: |
-          echo "=== RECHERCHE DU RAPPORT PDF ==="
-          PDF="$(find output -maxdepth 1 -type f -name 'rapport_veille_*.pdf' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
-
-          if [ -n "$PDF" ] && [ -f "$PDF" ]; then
-            echo "PDF FINAL TROUVÉ : $PDF"
-            echo "pdf_path=$PDF" >> "$GITHUB_OUTPUT"
-            echo "pdf_found=true" >> "$GITHUB_OUTPUT"
-            echo "## Rapport PDF final" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "**Fichier :** \`$PDF\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Aucun rapport PDF final trouvé dans output/"
-            echo "pdf_found=false" >> "$GITHUB_OUTPUT"
-            echo "## Rapport PDF final introuvable" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          echo ""
-          echo "=== CONTENU DE output/ ==="
-          find output -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
-
-      - name: Publication du rapport PDF comme artifact
-        if: always() && steps.rapport.outputs.pdf_found == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rapport-veille-apec-${{ github.run_number }}
-          path: ${{ steps.rapport.outputs.pdf_path }}
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Vérification des sorties
-        if: always()
-        run: |
-          echo "=== DATA ==="
-          ls -lah data/ 2>/dev/null || true
-          echo "=== OUTPUT ==="
-          ls -lah output/ 2>/dev/null || true
-          echo "=== EXCEL ==="
-          if [ -f "data/Apec_Salons_Evenements.xlsx" ]; then echo "Excel présent"; else echo "Excel absent"; fi
-
-      - name: Sauvegarde des résultats
-        if: always()
+      - name: Enregistrer les résultats et synchroniser main
         shell: bash
         run: |
           set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/ output/ 2>/dev/null || true
+          echo "========================================"
+          echo "PRÉPARATION DE LA SAUVEGARDE"
+          echo "========================================"
+
+          git add data/ output/
 
           if git diff --cached --quiet; then
-            echo "Aucun changement à sauvegarder."
-          else
-            git commit -m "Mise à jour automatique veille APEC"
-            git fetch origin main
-            git merge --no-edit -X ours origin/main
-            git push origin HEAD:main
-            echo "Résultats sauvegardés dans GitHub."
+            echo "Aucune modification à enregistrer."
+            exit 0
           fi
 
-      - name: Résumé final
-        if: always()
-        shell: bash
-        run: |
-          echo "=== WORKFLOW TERMINÉ ==="
-          echo "Statut : ${{ job.status }}"
-          if [ "${{ steps.rapport.outputs.pdf_found }}" = "true" ]; then
-            echo "PDF FINAL : ${{ steps.rapport.outputs.pdf_path }}"
-            echo "ARTIFACT : rapport-veille-apec-${{ github.run_number }}"
-          else
-            echo "PDF FINAL : introuvable"
-          fi
+          git commit -m "Mise à jour automatique veille APEC"
 
-          {
-            echo "## Sortie finale"
-            if [ "${{ steps.rapport.outputs.pdf_found }}" = "true" ]; then
-              echo "PDF généré : \`${{ steps.rapport.outputs.pdf_path }}\`"
-              echo ""
-              echo "Artifact : \`rapport-veille-apec-${{ github.run_number }}\`"
+          echo "========================================"
+          echo "SYNCHRONISATION AVEC ORIGIN/MAIN"
+          echo "========================================"
+
+          # Plusieurs tentatives protègent contre une mise à jour de main
+          # entre le fetch et le push.
+          MAX_RETRIES=5
+          SUCCESS=0
+
+          for attempt in $(seq 1 "$MAX_RETRIES"); do
+            echo ""
+            echo "🔄 Tentative $attempt/$MAX_RETRIES"
+
+            git fetch --prune origin main
+
+            # Si origin/main a avancé depuis la création du commit local,
+            # on le réintègre avant de pousser.
+            if ! git merge-base --is-ancestor origin/main HEAD; then
+              echo "⚠️ origin/main a avancé. Fusion avec la version distante..."
+
+              # Les fichiers data/ et output/ sont générés par cette veille.
+              # En cas de conflit, la version de ce run reste prioritaire.
+              git merge --no-edit -X ours origin/main
             else
-              echo "PDF final introuvable."
+              echo "✅ HEAD contient déjà origin/main."
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+
+            echo "🚀 Tentative de push..."
+            if git push origin HEAD:main; then
+              echo "✅ Push réussi."
+              SUCCESS=1
+              break
+            fi
+
+            echo "⚠️ Push refusé : main a probablement avancé pendant l'opération."
+
+            # On laisse le dépôt se resynchroniser avant la tentative suivante.
+            git fetch --prune origin main
+
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+              echo "⏳ Nouvelle tentative dans 3 secondes..."
+              sleep 3
+            fi
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "❌ Impossible de synchroniser main après $MAX_RETRIES tentatives."
+            echo "État Git :"
+            git status --short --branch
+            exit 1
+          fi
+
+      - name: Fin du workflow
+        run: |
+          echo "========================================"
+          echo "VEILLE APEC TERMINÉE"
+          echo "========================================"
