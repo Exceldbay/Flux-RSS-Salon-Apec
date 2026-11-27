@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "26/11/2026 15:24",
+            "text": "27/11/2026 08:43",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -27,7 +27,7 @@
             "facts": [
               {
                 "title": "Nouveaux pertinents",
-                "value": "3"
+                "value": "0"
               },
               {
                 "title": "Promus pertinents",
@@ -47,7 +47,7 @@
               },
               {
                 "title": "À vérifier actuels",
-                "value": "12"
+                "value": "1"
               },
               {
                 "title": "Tâches terminées",
@@ -67,14 +67,14 @@
           },
           {
             "type": "TextBlock",
-            "text": "Journée Portes Ouvertes - Campus Rodez | 3iL Ingénieurs",
+            "text": "Enseignement supérieur. L’école d’ingénieurs Isen ouvrira son nouveau campus sur la presqu'île de Caen en 2027 - Ouest-France",
             "weight": "Bolder",
             "wrap": true,
             "spacing": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 19 · score 56 · 2027 FORTE · 2027-01-23 · 3iL Ingénieurs",
+            "text": "**2027 À VÉRIFIER** · dép. 79 · score 44 · 2027 MOYENNE · date non précisée · Ouest-France",
             "wrap": true,
             "spacing": "None"
           },
@@ -84,79 +84,7 @@
               {
                 "type": "Action.OpenUrl",
                 "title": "Ouvrir la source",
-                "url": "https://www.3il-ingenieurs.fr/agenda/journee-portes-ouvertes-campus-rodez/"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Job Dating Limoges 2026 : date, horaires, exposants",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 53 · 2026-06-25T09:00:00+02:00 · Alsace",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://www.jds.fr/limoges/foires-et-salons/marches/job-dating-1614210_A"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "Journée portes ouvertes à l'école d'ingénieurs ENSIL-ENSCI de Limoges - Le Populaire du Centre",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**NOUVEAU PERTINENT** · dép. 87 · score 44 · date non précisée · Le Populaire du Centre",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMiywFBVV95cUxPcEdfRUFJUmtJbHlTR1VXcURvOG5UTTZmNmtrakNTbHV0VnA3UmsxdUt0VldsWlUzWEU3b0NlZk04NmJOWWcwN2hqM2dyTGlHQWNxVDhPdEdlRjRJWW42ZERCcHZzUXo1QzVvV2JMRk1Rdk0zMmdTb2dzSWJxZHVlTThELXI0b09NWDh3V1BzWmhvTDB5OVdXdWVsWE9rbjM2aHgyaWctZGlrbVdxZ0ZiTUtEZ29VSXNReUZBQ2h5Y2U3T000cmc0NUlkNA?oc=5"
-              }
-            ],
-            "spacing": "None"
-          },
-          {
-            "type": "TextBlock",
-            "text": "JU Strasbourg - Journées des Universités 2027 : salon, portes ouvertes - jds.fr",
-            "weight": "Bolder",
-            "wrap": true,
-            "spacing": "Small"
-          },
-          {
-            "type": "TextBlock",
-            "text": "**2027 À VÉRIFIER** · dép. 79 · score 27 · 2027 MOYENNE · date non précisée · jds.fr",
-            "wrap": true,
-            "spacing": "None"
-          },
-          {
-            "type": "ActionSet",
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "Ouvrir la source",
-                "url": "https://news.google.com/rss/articles/CBMixgFBVV95cUxPV2dkRjhUQ1JNU1lmbnlPcDJoeFZnWThZLWNJV182a3NQYklJTU5mcE1mcmlRS2l0M3JUd1A0bkkwUmRrYncyQUE4cHZKYzN5VUt6UUVYRkpZYkh2UTJGUUdmel9zMjVwa3d3enRMdW5ZVzd4eWlDQndDRVpoX3M3bkRKbWYyN190V1BBVW1FMTdKbElhYm5fYTM3UXgyMVdNSzgwZkhfT2wyZERPN0QxMXZucEIwTlhtQVRFbW04c2ZfYWhMbHc?oc=5"
+                "url": "https://news.google.com/rss/articles/CBMirwJBVV95cUxNV183MC1tc1JWWDh0V28wYXVmYXJrZElOenZJcmZBeHo2bXdMTFRJdllBMXg1Z3VqSmxSY1BpQTZvTTJWcnN5c18xV3N1TGF3QlJWZGRia2lPc3BhY1RPQTZyejN2ZmMzeE5xb2NJUVhxcFV2SjFMVHNjZFNYZGhZcU9vcGRFOVdYUVFVUGRCX1F3dlBSUEZNT2FocUhHaU9DM2RodW1pMGlJemZUNUthMHR5RzNoMndKejYyZWx4MTc3SDRJcHhKZnVhUjNPaWZMM05XSXBzcDdDS0Z4VHA0SlFVTmhndDV6b2llY1RqR2tmVXZwQ2JKUWFadWtvYjNCOENyRW9kUnI0N1ZxWWltYUUzMEZ6RmtSSXlyVE5YbWtIYWtRanRIY1ZEWndjdms?oc=5"
               }
             ],
             "spacing": "None"
@@ -169,28 +97,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 20.0s — 3081 résultats, 0 erreurs",
+            "text": "✅ T01 — Collecte RSS · 20.0s — 3103 résultats, 5 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 127.0s — 445 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 127.0s — 420 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage · 23.0s — 1202 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage · 38.0s — 1172 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 16 pertinents / 90 à vérifier / 1096 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 19 pertinents / 471 à vérifier / 682 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -204,7 +132,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 2663.0s — 100 candidats traités",
+            "text": "✅ T01 — Analyse IA · 2011.0s — 440 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -225,14 +153,14 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Sauvegarde CSV — CSV principaux + audits enregistrés",
+            "text": "✅ T01 — Sauvegarde CSV · 1.0s — CSV principaux + audits enregistrés",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Synchronisation Excel — Classeur Excel mis à jour",
+            "text": "✅ T01 — Synchronisation Excel · 1.0s — Classeur Excel mis à jour",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -259,31 +187,31 @@
           },
           {
             "type": "TextBlock",
-            "text": "portes ouvertes — 8 uniques · 2 pertinents · 3 à vérifier",
+            "text": "enseignement supérieur — 362 uniques · 0 pertinents · 1 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "source:site_officiel — 80 uniques · 1 pertinents · 1 à vérifier",
+            "text": "source:site_officiel — 80 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "source:bing_news — 6 uniques · 1 pertinents · 0 à vérifier",
+            "text": "source:openagenda — 331 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "job dating — 181 uniques · 0 pertinents · 13 à vérifier",
+            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
           {
             "type": "TextBlock",
-            "text": "enseignement supérieur — 295 uniques · 0 pertinents · 4 à vérifier",
+            "text": "forum recrutement — 4 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -296,7 +224,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "IA : 30 appels · 2 mémoire · 0 non analysés · quota bloqué : OUI · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
+            "text": "IA : 22 appels · 0 mémoire · 0 non analysés · quota bloqué : NON · modèle : gemini-3.1-flash-lite → gemini-3.8-flash · seuil : 24 · max : 3.1 illimité / 3.8 max 5",
             "isSubtle": true,
             "wrap": true,
             "spacing": "Medium"
