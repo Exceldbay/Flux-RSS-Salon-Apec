@@ -122,7 +122,7 @@ IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
 IA_RULES_VERSION = "v33-geo-prequeries-strictes"
-GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
+GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
 
@@ -2306,6 +2306,181 @@ def calculer_score(resultat):
     }
 
 
+
+def filtrer_candidats_avant_scoring(resultats):
+    """V35 : filtre dur avant scoring/IA.
+
+    Objectif : empêcher les sources externes et RSS manifestement hors sujet
+    de polluer le scoring et Gemini. Ce filtre ne cherche pas à décider de la
+    pertinence Apec finale ; il élimine seulement les faux candidats évidents.
+
+    Un candidat doit démontrer :
+      1) un événement réel ou un format événementiel identifiable ;
+      2) une géographie compatible avec les 7 départements ;
+      3) un lien avec emploi/recrutement/supérieur/cadres/profils qualifiés ;
+      4) une période encore exploitable.
+
+    Les cas ambigus restent dans le flux pour Gemini, mais les contenus
+    manifestement hors sujet sont rejetés immédiatement.
+    """
+    acceptes = []
+    rejetes = []
+    motifs = {}
+
+    # Signaux très spécifiques : ils évitent de considérer « université »,
+    # « formation » ou « recrutement » seuls comme un événement Apec.
+    cible_directe = set(APEC_DIRECT)
+    cible_qualifiee = set(APEC_QUALIFIE)
+    relation = set(RELATION_ENTREPRISE)
+    evenements = set(EVENT_SIGNAL_CIBLE)
+    structures = set(EVENT_MOTS_STRUCTURELS)
+    exclusions = set(EXCLUSIONS_FORTES)
+    editoriaux = set(EXCLUSIONS_EDITORIAL)
+
+    for resultat in resultats:
+        texte = normaliser(" ".join(str(resultat.get(k, "")) for k in (
+            "titre", "description", "titre_page", "description_page",
+            "extrait_page", "lieu_page", "organisateur_page",
+            "date_evenement_page"
+        )))
+        titre = normaliser(resultat.get("titre_page") or resultat.get("titre", ""))
+
+        # 1. Géographie dure.
+        corriger_departement_par_ville(resultat)
+        geo_ok, geo_motif, geo_code = verifier_geographie_stricte(resultat)
+        if not geo_ok:
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "HORS_GEOGRAPHIE",
+                "erreur_geographique": "ERREUR_GEOGRAPHIQUE",
+                "hors_geographie": geo_motif,
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["HORS_GEOGRAPHIE"] = motifs.get("HORS_GEOGRAPHIE", 0) + 1
+            continue
+        resultat["pre_filtre_geo"] = "OK"
+        if geo_code:
+            resultat["departement"] = str(geo_code)
+            resultat["nom_departement"] = NOMS_DEPARTEMENTS.get(str(geo_code), resultat.get("nom_departement", ""))
+
+        # 2. Exclusions fortes : ces contenus ne doivent pas arriver à Gemini.
+        signaux_exclusion = [x for x in exclusions if x in texte]
+        if signaux_exclusion:
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "EXCLUSION_FORTE",
+                "motif_exclusion": ", ".join(signaux_exclusion[:8]),
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["EXCLUSION_FORTE"] = motifs.get("EXCLUSION_FORTE", 0) + 1
+            continue
+
+        # 3. Doit ressembler à un événement. Les mots métier seuls ne suffisent pas.
+        signaux_event = [x for x in evenements if x in texte]
+        signaux_structure = [x for x in structures if x in texte]
+        preuve = [x for x in EVENT_PREUVE_FORTE if x in texte]
+        event_titre = [x for x in evenements if x in titre]
+        event_reel = bool(signaux_event and (event_titre or preuve or signaux_structure
+                                             or resultat.get("date_evenement_page")
+                                             or resultat.get("lieu_page")
+                                             or resultat.get("organisateur_page")))
+        if not event_reel:
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "PAS_UN_EVENEMENT",
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["PAS_UN_EVENEMENT"] = motifs.get("PAS_UN_EVENEMENT", 0) + 1
+            continue
+
+        # 4. Le lien Apec doit être réel. Une formation ou une université seule
+        # n'est pas suffisante. On accepte les cas supérieurs si le contexte
+        # entreprise/recrutement ou le public qualifié est également présent.
+        direct = [x for x in cible_directe if x in texte]
+        qualifie = [x for x in cible_qualifiee if x in texte]
+        rel = [x for x in relation if x in texte]
+        superieur = [x for x in SUPERIEUR_FORT if x in texte]
+        cible = bool(
+            direct
+            or rel
+            or (qualifie and (rel or superieur))
+            or (superieur and (rel or any(x in texte for x in ("alumni", "anciens élèves", "master", "bac+5", "ingénieurs"))))
+        )
+
+        # Les pages purement éditoriales ne passent que si elles contiennent
+        # malgré tout un événement + une cible explicite.
+        editorial = [x for x in editoriaux if x in texte]
+        if not cible:
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "CIBLE_APEC_INSUFFISANTE",
+                "signaux_cible_apec_pre": ", ".join(direct + qualifie[:5] + rel[:5]),
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["CIBLE_APEC_INSUFFISANTE"] = motifs.get("CIBLE_APEC_INSUFFISANTE", 0) + 1
+            continue
+
+        # 5. Si le texte est explicitement une actualité/portrait/recensement
+        # sans marqueur événementiel fort dans le titre, on rejette.
+        if editorial and not event_titre and not preuve and not resultat.get("date_evenement_page"):
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "ARTICLE_EDITORIAL",
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["ARTICLE_EDITORIAL"] = motifs.get("ARTICLE_EDITORIAL", 0) + 1
+            continue
+
+        # 6. Événement daté dans le passé : si une date précise est connue,
+        # il n'est plus un candidat de la veille courante.
+        date_evt = parser_date_evenement(resultat.get("date_evenement_page", ""))
+        if date_evt and date_evt.date() < datetime.now().date():
+            resultat.update({
+                "pre_filtre": "REJETE",
+                "pre_filtre_motif": "EVENEMENT_PASSE",
+                "score": 0,
+                "statut": "Non pertinent",
+                "statut_final": "Non pertinent",
+            })
+            rejetes.append(resultat)
+            motifs["EVENEMENT_PASSE"] = motifs.get("EVENEMENT_PASSE", 0) + 1
+            continue
+
+        resultat.update({
+            "pre_filtre": "ACCEPTE",
+            "pre_filtre_motif": "CANDIDAT_APEC",
+            "preuve_evenement_pre": "OUI" if (preuve or event_titre or resultat.get("date_evenement_page") or resultat.get("lieu_page")) else "NON",
+            "signaux_evenement_pre": ", ".join(signaux_event[:8]),
+            "signaux_cible_apec_pre": ", ".join((direct + qualifie[:5] + rel[:5])[:12]),
+        })
+        acceptes.append(resultat)
+
+    print()
+    print("🛡️ FILTRE DUR V35")
+    print(f"Entrées : {len(resultats)}")
+    print(f"Candidats conservés : {len(acceptes)}")
+    print(f"Rejetés avant scoring/IA : {len(rejetes)}")
+    if motifs:
+        print("Motifs : " + " | ".join(f"{k}={v}" for k, v in sorted(motifs.items())))
+
+    return acceptes, rejetes, motifs
+
+
 def traiter(resultats, memoire_globale=None):
     resultats = dedoublonner(resultats)
     memoire_globale = memoire_globale or {}
@@ -2511,11 +2686,10 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         if erreur_geo == "ERREUR_GEOGRAPHIQUE":
             candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":"Hors périmètre géographique : exclu avant analyse IA.","ia_analyse":"NON","statut_final":"Non pertinent"})
             hors_perimetre.append(candidat); continue
-        if score >= GEMINI_SCORE_MIN:
-            candidats.append(candidat)
-        else:
-            candidat.update({"decision_ia":"IA_NON_REQUISE","confiance_ia":0,"raison_ia":f"Premier filtre Python non atteint : score {score} < {GEMINI_SCORE_MIN}.","ia_analyse":"NON","statut_final":candidat.get("statut","À vérifier")})
-            non_eligibles.append(candidat)
+        # V35 : après le filtre événementiel dur, tout candidat encore éligible
+        # est envoyé à Gemini 3.1. Le score Python ne sert plus de barrière
+        # métier : il reste un signal explicable pour l'arbitrage.
+        candidats.append(candidat)
 
     # ------------------------------------------------------------
     # PRÉ-ANALYSE GÉOGRAPHIQUE IA
@@ -3905,7 +4079,7 @@ def main():
     print(f"Version du programme : {VERSION_PROGRAMME} | règles IA : {REGLES_VERSION}")
     print(
         f"Années : ≥ {ANNEE_MIN} (priorité {ANNEE_PRIORITAIRE}) | "
-        f"Gemini : seuil >= {GEMINI_SCORE_MIN} | 3.1: illimité/10s | 3.8: max {MAX_IA_38}/60s | mémoire globale"
+        f"Gemini : tous les candidats V35 | 3.1: illimité/10s | 3.8: max {MAX_IA_38}/60s | mémoire globale"
     )
 
     initialiser_suivi_taches()
@@ -3962,13 +4136,27 @@ def main():
 
     # Aucun journal intermédiaire : le rapport PDF unique est généré en fin de run.
 
-    resultats_bruts = externes + resultats_bruts
+    for _r in externes:
+        _r.setdefault("origine_collecte", "externe")
+    for _r in resultats_bruts:
+        _r.setdefault("origine_collecte", "rss")
+
+    # --------------------------------------------------------
+    # FILTRE DUR V35 AVANT TOUT SCORING
+    # --------------------------------------------------------
+    # Les sources externes et RSS sont filtrées ensemble, mais les compteurs
+    # de provenance sont conservés séparément. Les contenus manifestement
+    # hors sujet ne deviennent jamais des « candidats » de la veille.
+    resultats_collectes = externes + resultats_bruts
+    resultats_bruts, rejets_pretraitement, motifs_pretraitement = filtrer_candidats_avant_scoring(resultats_collectes)
 
     print()
     print("========================================")
     print("TRAITEMENT")
     print("========================================")
-    print(f"Résultats bruts : {len(resultats_bruts)}")
+    print(f"Résultats collectés : {len(resultats_collectes)}")
+    print(f"Candidats après filtre V35 : {len(resultats_bruts)}")
+    print(f"Rejets avant scoring/IA : {len(rejets_pretraitement)}")
 
     if not resultats_bruts:
         print()
@@ -4129,8 +4317,10 @@ def main():
 
     # Métadonnées de collecte utilisées par le rapport Teams.
     meta_resultats = {
-        "resultats_rss": len(resultats_bruts) - len(externes),
-        "resultats_externes": len(externes),
+        "resultats_rss": sum(1 for r in resultats_bruts if str(r.get("origine_collecte", "")).lower() not in {"externe", "source_externe"}),
+        "resultats_externes": sum(1 for r in resultats_bruts if str(r.get("origine_collecte", "")).lower() in {"externe", "source_externe"}),
+        "resultats_collectes_avant_filtre": len(resultats_collectes),
+        "rejets_pretraitement": len(rejets_pretraitement),
     }
 
     synchronisation_ok = False
