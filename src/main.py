@@ -760,85 +760,145 @@ def date_publication_dt(date_publication):
 
 
 def verifier_geographie_stricte(resultat):
-    """Filtre géographique ABSOLU.
+    """Contrôle géographique strict centré sur le LIEU DE L'ÉVÉNEMENT.
 
-    Règle : le lieu de l'événement doit appartenir aux départements
-    16/17/19/23/79/86/87. Une localisation explicitement hors périmètre
-    entraîne un rejet immédiat. Si une localisation cible est identifiable,
-    elle devient la référence. À défaut, le département de la requête est
-    conservé seulement s'il n'existe aucun indice géographique contradictoire.
+    Une ville hors périmètre mentionnée comme organisateur, partenaire,
+    entreprise participante ou origine du public ne suffit pas à exclure.
 
-    Retourne (ok, motif, code_detecte).
+    Hiérarchie de preuve :
+      1. adresse/lieu explicite de la page ;
+      2. titre avec une construction de lieu (« à Poitiers », « Poitiers ») ;
+      3. description avec une construction de lieu explicite ;
+      4. département de la requête comme indice de dernier recours.
+
+    Une preuve positive cible l'emporte sur une simple mention hors zone.
     """
     code_requete = str(resultat.get("departement", "")).strip()
     if code_requete not in DEPARTEMENTS_CIBLES:
         return False, f"Département de recherche hors périmètre : {code_requete or 'inconnu'}", code_requete
 
-    # Pour déterminer le lieu réel, on privilégie les champs liés au lieu
-    # de l'événement. On n'utilise volontairement pas l'organisateur seul.
-    texte_lieu = _normaliser_geo_fort(" ".join(str(resultat.get(k, "")) for k in (
-        "lieu_page", "lieu", "titre_page", "titre", "description_page", "description"
-    )))
+    def trouve_code_dans_texte(texte):
+        t = _normaliser_geo_fort(texte)
+        trouves = []
+        for code, nom in DEPARTEMENTS_FRANCAIS.items():
+            n = _normaliser_geo_fort(nom)
+            if n and re.search(r"(?<![a-z])" + re.escape(n) + r"(?![a-z])", t):
+                trouves.append(code)
+        for code, villes in VILLES_DEPARTEMENTS.items():
+            for ville in villes:
+                n = _normaliser_geo_fort(ville)
+                if n and re.search(r"(?<![a-z])" + re.escape(n) + r"(?![a-z])", t):
+                    trouves.append(code)
+                    break
+        return sorted(set(trouves))
 
-    # 1) Code postal explicite dans le contexte géographique.
-    codes_postaux = re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", texte_lieu)
-    for cp in codes_postaux:
-        prefixe = cp[:2]
-        if prefixe in DEPARTEMENTS_CIBLES:
-            resultat["departement"] = prefixe
-            resultat["nom_departement"] = NOMS_DEPARTEMENTS[prefixe]
-            resultat["geographie_corrigee"] = "OUI"
-            resultat["geographie_stricte"] = "OUI"
-            return True, f"Code postal cible détecté : {cp}", prefixe
-        # Un code postal hors cible est une preuve forte d'exclusion.
-        resultat["geographie_stricte"] = "NON"
-        return False, f"Code postal hors périmètre : {cp}", prefixe
+    # 1. Champs explicitement géographiques : preuve la plus forte.
+    champs_lieu = [
+        resultat.get("lieu_page", ""),
+        resultat.get("adresse_page", ""),
+        resultat.get("adresse", ""),
+        resultat.get("lieu", ""),
+    ]
+    texte_lieu_fort = _normaliser_geo_fort(" ".join(str(x) for x in champs_lieu if x))
 
-    # 2) Nom explicite d'un département.
-    departements_trouves = []
-    for code, nom in DEPARTEMENTS_FRANCAIS.items():
-        nom_norm = _normaliser_geo_fort(nom)
-        if nom_norm and re.search(r"(?<![a-z])" + re.escape(nom_norm) + r"(?![a-z])", texte_lieu):
-            departements_trouves.append(code)
+    if texte_lieu_fort:
+        codes_postaux = re.findall(r"(?<!\d)(?:0[1-9]|[1-8]\d|9[0-5])\d{3}(?!\d)", texte_lieu_fort)
+        for cp in codes_postaux:
+            prefixe = cp[:2]
+            if prefixe in DEPARTEMENTS_CIBLES:
+                resultat["departement"] = prefixe
+                resultat["nom_departement"] = NOMS_DEPARTEMENTS[prefixe]
+                resultat["geographie_corrigee"] = "OUI"
+                resultat["geographie_stricte"] = "OUI"
+                return True, f"Adresse/code postal cible : {cp}", prefixe
+            return False, f"Adresse/code postal hors périmètre : {cp}", prefixe
 
-    departements_trouves = sorted(set(departements_trouves))
-    if departements_trouves:
-        cibles = [c for c in departements_trouves if c in DEPARTEMENTS_CIBLES]
-        hors = [c for c in departements_trouves if c not in DEPARTEMENTS_CIBLES]
-        if hors and not cibles:
-            resultat["geographie_stricte"] = "NON"
-            noms = ", ".join(DEPARTEMENTS_FRANCAIS[c] for c in hors[:3])
-            return False, f"Département explicitement hors périmètre : {noms}", hors[0]
+        codes = trouve_code_dans_texte(texte_lieu_fort)
+        if codes:
+            cibles = [c for c in codes if c in DEPARTEMENTS_CIBLES]
+            hors = [c for c in codes if c not in DEPARTEMENTS_CIBLES]
+            if cibles:
+                code = cibles[0]
+                resultat["departement"] = code
+                resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
+                resultat["geographie_corrigee"] = "OUI"
+                resultat["geographie_stricte"] = "OUI"
+                return True, f"Lieu/adresse cible détecté : département {code}", code
+            if hors:
+                return False, f"Lieu/adresse explicitement hors périmètre : {DEPARTEMENTS_FRANCAIS.get(hors[0], hors[0])}", hors[0]
+
+    # 2. Titre : on ne considère comme lieu que les formulations explicites.
+    titre = _normaliser_geo_fort(resultat.get("titre_page") or resultat.get("titre", ""))
+    desc = _normaliser_geo_fort(resultat.get("description_page") or resultat.get("description", ""))
+
+    # Expressions qui indiquent réellement le lieu de l'événement.
+    textes_contextuels = [titre, desc]
+    codes_contextuels = []
+
+    # On cherche uniquement des villes connues, précédées d'un marqueur
+    # géographique explicite. Cela évite qu'un simple nom d'entreprise ou
+    # une ville citée dans le public soit interprétée comme lieu.
+    toutes_villes = []
+    for code, villes in VILLES_DEPARTEMENTS.items():
+        toutes_villes.extend((code, _normaliser_geo_fort(v)) for v in villes if v)
+    villes_hors = [(code, _normaliser_geo_fort(nom))
+                   for code, nom in DEPARTEMENTS_FRANCAIS.items()
+                   if code not in DEPARTEMENTS_CIBLES]
+
+    marqueurs = r"(?:a|à|vers|dans|sur|chez|lieu|adresse|localisation|organisé à|organisee à|organisée à|se tiendra à|aura lieu à)"
+    for texte in textes_contextuels:
+        for code, ville_norm in toutes_villes + villes_hors:
+            if not ville_norm:
+                continue
+            if re.search(
+                rf"\b{marqueurs}\s+{re.escape(ville_norm)}\b",
+                texte
+            ):
+                codes_contextuels.append(code)
+
+    # Variante forte : « événement : Bordeaux » / « lieu : Bordeaux ».
+    for texte in textes_contextuels:
+        for code, ville_norm in toutes_villes + villes_hors:
+            if ville_norm and re.search(
+                rf"\b(?:lieu|adresse|localisation)\s*[:\-]\s*{re.escape(ville_norm)}\b",
+                texte
+            ):
+                codes_contextuels.append(code)
+
+    codes_contextuels = sorted(set(codes_contextuels))
+    codes_contextuels = sorted(set(codes_contextuels))
+
+    if codes_contextuels:
+        cibles = [c for c in codes_contextuels if c in DEPARTEMENTS_CIBLES]
+        hors = [c for c in codes_contextuels if c not in DEPARTEMENTS_CIBLES]
         if cibles:
             code = cibles[0]
             resultat["departement"] = code
             resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
             resultat["geographie_corrigee"] = "OUI"
             resultat["geographie_stricte"] = "OUI"
-            return True, f"Département cible explicitement détecté : {code}", code
+            return True, f"Lieu explicite cible détecté : département {code}", code
+        if hors:
+            return False, f"Lieu explicite hors périmètre : {DEPARTEMENTS_FRANCAIS.get(hors[0], hors[0])}", hors[0]
 
-    # 3) Ville cible connue.
-    codes_villes = []
-    for code, villes in VILLES_DEPARTEMENTS.items():
-        for ville in villes:
-            ville_norm = _normaliser_geo_fort(ville)
-            if ville_norm and re.search(r"(?<![a-z])" + re.escape(ville_norm) + r"(?![a-z])", texte_lieu):
-                codes_villes.append(code)
-                break
-    codes_villes = sorted(set(codes_villes))
-    if len(codes_villes) == 1:
-        code = codes_villes[0]
-        resultat["departement"] = code
-        resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
-        resultat["geographie_corrigee"] = "OUI"
-        resultat["geographie_stricte"] = "OUI"
-        return True, f"Ville cible détectée dans le département {code}", code
+    # 3. Ville cible clairement présente dans le titre : cas fréquent des
+    # titres « Forum emploi Poitiers 2027 ». Une mention dans le corps seul
+    # n'est pas considérée comme preuve suffisante.
+    codes_titre = trouve_code_dans_texte(titre)
+    if len(codes_titre) == 1:
+        code = codes_titre[0]
+        if code in DEPARTEMENTS_CIBLES:
+            resultat["departement"] = code
+            resultat["nom_departement"] = NOMS_DEPARTEMENTS[code]
+            resultat["geographie_corrigee"] = "OUI"
+            resultat["geographie_stricte"] = "OUI"
+            return True, f"Ville cible dans le titre : département {code}", code
+        return False, f"Ville hors périmètre dans le titre : {DEPARTEMENTS_FRANCAIS.get(code, code)}", code
 
-    # 4) Aucun indice contradictoire : on conserve le département porté par
-    # la requête, mais on marque que la preuve géographique reste indirecte.
-    # Il pourra être renforcé par l'enrichissement de page.
+    # 4. Aucun lieu contradictoire : le département porté par la requête
+    # reste un indice, pas une preuve absolue.
     resultat["geographie_stricte"] = "INDIRECTE"
-    return True, f"Département de requête cible : {code_requete}, aucune contradiction géographique détectée", code_requete
+    return True, f"Département de recherche cible conservé comme indice : {code_requete}", code_requete
 
 
 def detecter_geographie(resultat):
@@ -1036,11 +1096,58 @@ def construire_requetes(departements):
 # GOOGLE NEWS RSS
 # ============================================================
 
+def construire_bloc_geo_recherche(requete):
+    """Construit un bloc géographique strict pour les pré-requêtes Google News.
+
+    Le moteur ne doit pas seulement demander le nom du département : Google
+    News peut alors retourner des événements d'autres territoires. Pour une
+    recherche départementale, on exige au contraire une ville connue du
+    département OU le nom exact du département. Pour une recherche déjà
+    centrée sur une ville, cette ville devient prioritaire.
+
+    Les villes hors périmètre ne sont jamais ajoutées comme alternatives
+    positives. Elles sont seulement utilisées comme exclusions négatives
+    pour réduire le bruit.
+    """
+    code = str(requete.get("departement", "")).strip()
+    ville = _normaliser_geo_fort(requete.get("lieu", ""))
+    villes = VILLES_DEPARTEMENTS.get(code, [])
+
+    # Une requête déjà localisée reste centrée sur cette ville.
+    if ville:
+        positives = [ville]
+    else:
+        # Toutes les villes connues du département sont candidates.
+        # On ajoute aussi le nom du département comme solution de repli.
+        positives = [_normaliser_geo_fort(v) for v in villes if v]
+        nom = _normaliser_geo_fort(NOMS_DEPARTEMENTS.get(code, ""))
+        if nom:
+            positives.append(nom)
+
+    positives = list(dict.fromkeys(x for x in positives if x))
+
+    # Google News interprète OR correctement dans les parenthèses.
+    bloc_positif = " OR ".join(f'"{v}"' for v in positives)
+
+    # Exclusions des principales zones hors cible déjà identifiées.
+    # Elles sont négatives : elles ne deviennent jamais des critères
+    # géographiques positifs.
+    exclusions = []
+    for ville_hors in VILLES_HORS_CIBLE:
+        v = _normaliser_geo_fort(ville_hors)
+        if v:
+            exclusions.append(f'-"{v}"')
+
+    return f"({bloc_positif}) " + " ".join(exclusions)
+
+
 def rechercher_google_news(requete):
+
+    bloc_geo = construire_bloc_geo_recherche(requete)
 
     texte = (
         f'"{requete["mot_cle"]}" '
-        f'"{requete.get("lieu") or requete["nom_departement"]}" '
+        f'{bloc_geo} '
         + (f'{requete["complement"]} ' if requete.get("complement") else "")
         + f'{requete["annee"]}'
     )
@@ -2417,7 +2524,6 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     geo_nouveaux_bdd, geo_modifies_bdd, geo_reutilises_bdd = classifier_candidats_bdd(geo_preexclus, bdd_candidats) if geo_preexclus else ([], [], [])
     geo_preexclus = geo_nouveaux_bdd + geo_modifies_bdd
 
-    geo_reutilises_bdd = geo_preexclus_secondaire_reutilises
     candidats = sorted(candidats_geo_ok, key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
     nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
     a_analyser_bdd = nouveaux_bdd + modifies_bdd
