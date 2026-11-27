@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v38-audit-pipeline-3x31-plus1x38-geo"
+IA_RULES_VERSION = "v39-audit-ia-bdd-3x31-plus1x38-geo"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -315,7 +315,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v38-audit-pipeline"
+VERSION_PROGRAMME = "2026-11-27-v39-audit-ia-bdd"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -3131,6 +3131,8 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         "appels_31": appels_31,
         "appels_38": appels_38,
         "candidats_analyzes": len(t3_ok),
+        "a_traiter_reellement": len(a_traiter),
+        "bdd_reutilises": len(reutilises_bdd) + len(geo_reutilises_bdd),
         "memoire_reutilisee": len(memorises),
         "geo_bloques": len(geo_preexclus),
         "quota_bloque": quota_bloque,
@@ -4172,9 +4174,12 @@ def generer_rapport_pdf_unique(
         [cell("Candidats après pré-filtre"), cell(audit.get("apres_pre_filtre", 0))],
         [cell("Rejets avant scoring / IA"), cell(audit.get("rejets_pre_filtre", 0))],
         [cell("Après traitement Python"), cell(audit.get("apres_traitement", 0))],
-        [cell("Entrée IA"), cell(audit.get("candidats_ia_entree", 0))],
+        [cell("Entrée couche IA"), cell(audit.get("candidats_ia_entree", 0))],
+        [cell("À traiter réellement par Gemini"), cell(audit.get("ia_a_traiter_reellement", 0))],
         [cell("Analyses IA réelles"), cell(audit.get("candidats_ia_reels", 0))],
-        [cell("Résultats IA"), cell(audit.get("resultats_ia", 0))],
+        [cell("Décisions IA réelles"), cell(audit.get("resultats_ia_reels", 0))],
+        [cell("Réutilisations BDD"), cell(audit.get("ia_reutilises_bdd", 0))],
+        [cell("Réutilisations mémoire IA"), cell(audit.get("ia_reutilises_memoire", 0))],
         [cell("Pertinents finaux"), cell(audit.get("pertinents_final", len(pertinents)))],
         [cell("À vérifier finaux"), cell(audit.get("a_verifier_final", len(a_verifier)))],
         [cell("Non pertinents finaux"), cell(audit.get("non_pertinents_final", len(non_pertinents)))],
@@ -4208,7 +4213,12 @@ def generer_rapport_pdf_unique(
         ("RSS brut", "rss_brut"), ("Sources externes brutes", "externes_brut"),
         ("Total brut", "total_brut"), ("Après pré-filtre", "apres_pre_filtre"),
         ("Rejets pré-filtre", "rejets_pre_filtre"), ("Après traitement Python", "apres_traitement"),
-        ("Entrée IA", "candidats_ia_entree"), ("Analyses IA réelles", "candidats_ia_reels"),
+        ("Entrée couche IA", "candidats_ia_entree"),
+        ("À traiter réellement par Gemini", "ia_a_traiter_reellement"),
+        ("Analyses IA réelles", "candidats_ia_reels"),
+        ("Décisions IA réelles", "resultats_ia_reels"),
+        ("Réutilisations BDD", "ia_reutilises_bdd"),
+        ("Réutilisations mémoire IA", "ia_reutilises_memoire"),
     ]:
         audit_lignes.append([cell(lib), cell(audit.get(cle, 0))])
     if motifs_audit:
@@ -4473,7 +4483,11 @@ def main():
     )
 
     AUDIT_PIPELINE["resultats_ia"] = len(ia_resultats)
+    AUDIT_PIPELINE["resultats_ia_reels"] = sum(1 for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("memoire_ia") != "OUI" and r.get("ia_analyse") in {"OUI", "GEO_PREEXCLUSION"})
     AUDIT_PIPELINE["candidats_ia_reels"] = LAST_IA_STATS.get("candidats_analyzes", 0)
+    AUDIT_PIPELINE["ia_reutilises_bdd"] = LAST_IA_STATS.get("bdd_reutilises", 0)
+    AUDIT_PIPELINE["ia_reutilises_memoire"] = LAST_IA_STATS.get("memoire_reutilisee", 0)
+    AUDIT_PIPELINE["ia_a_traiter_reellement"] = LAST_IA_STATS.get("a_traiter_reellement", 0)
 
     # ========================================================
     # DELTA D'AFFICHAGE — UNIQUEMENT NOUVEAUX / MODIFIÉS
@@ -4482,6 +4496,11 @@ def main():
     # réutilisé ne doit réapparaître dans les sorties du run courant.
     # Un candidat modifié est considéré comme nouveau pour l'affichage du
     # jour, car son contenu/source a changé depuis sa dernière analyse.
+    # Diagnostic V39 : si beaucoup de candidats entrent dans la couche IA mais
+    # aucun ne passe réellement par Gemini, le rapport doit l'indiquer clairement.
+    if AUDIT_PIPELINE.get("candidats_ia_entree", 0) and AUDIT_PIPELINE.get("ia_a_traiter_reellement", 0) == 0:
+        print("ℹ️ V39 : aucun appel Gemini nécessaire sur ce run : candidats déjà connus/réutilisés.")
+
     resultats_du_jour = [
         r for r in ia_resultats
         if r.get("bdd_reutilise") is not True
