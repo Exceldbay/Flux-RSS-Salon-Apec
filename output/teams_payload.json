@@ -18,7 +18,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "27/11/2026 10:11",
+            "text": "27/11/2026 10:21",
             "isSubtle": true,
             "spacing": "None"
           },
@@ -73,28 +73,28 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte RSS · 3.0s — 140 résultats, 0 erreurs",
+            "text": "✅ T01 — Collecte RSS · 3.0s — 143 résultats, 0 erreurs",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Collecte sources externes · 129.0s — 420 résultats externes",
+            "text": "✅ T01 — Collecte sources externes · 121.0s — 432 résultats externes",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Dédoublonnage — 138 résultats conservés après traitement",
+            "text": "✅ T01 — Dédoublonnage — 139 résultats conservés après traitement",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Scoring / qualification — 10 pertinents / 125 à vérifier / 3 non pertinents",
+            "text": "✅ T01 — Scoring / qualification — 12 pertinents / 124 à vérifier / 3 non pertinents",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -108,7 +108,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "✅ T01 — Analyse IA · 7.0s — 22 candidats traités",
+            "text": "✅ T01 — Analyse IA · 5.0s — 24 candidats traités",
             "wrap": true,
             "spacing": "None",
             "size": "Small"
@@ -163,7 +163,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "source:site_officiel — 15 uniques · 0 pertinents · 0 à vérifier",
+            "text": "source:site_officiel — 17 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
@@ -175,7 +175,7 @@
           },
           {
             "type": "TextBlock",
-            "text": "source:bing_news — 5 uniques · 0 pertinents · 0 à vérifier",
+            "text": "source:bing_news — 4 uniques · 0 pertinents · 0 à vérifier",
             "wrap": true,
             "spacing": "None"
           },
