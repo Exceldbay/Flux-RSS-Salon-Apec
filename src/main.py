@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.parse import quote_plus, urljoin
+from urllib.parse import quote_plus, urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v41-reconciliation-arbitrage-coherence-3x31-plus1x38"
+IA_RULES_VERSION = "v42-preuves-multisources-3x31-plus1x38"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "0"))  # V36 : pas de seuil bloquant par défaut
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -183,6 +183,12 @@ AUDIT_PIPELINE = {
     "pertinents_final": 0,
     "a_verifier_final": 0,
     "non_pertinents_final": 0,
+    "preuves_verifiees": 0,
+    "preuves_fortes": 0,
+    "preuves_moyennes": 0,
+    "preuves_faibles": 0,
+    "preuves_absentes": 0,
+    "sources_secondaires_trouvees": 0,
 }
 
 # Journal détaillé de la phase de recherche RSS.
@@ -318,7 +324,7 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-27-v39-audit-ia-bdd"
+VERSION_PROGRAMME = "2026-11-27-v42-preuves-multisources"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
@@ -2983,6 +2989,159 @@ def arbitrer_coherence_decision(resultat, decision):
     return d, ""
 
 
+
+def _domaine_url(url):
+    try:
+        return urlparse(str(url or "").strip()).netloc.lower().replace("www.", "")
+    except Exception:
+        return ""
+
+
+def _preuve_secondaire_google_news(candidat):
+    """Recherche une seconde source indépendante pour le même événement.
+
+    La recherche est volontairement étroite : titre + lieu + année. Elle ne
+    sert pas à créer un candidat ; elle sert uniquement à confirmer un
+    événement déjà passé le filtre V42. La source primaire est exclue lorsque
+    son domaine est identifiable.
+    """
+    titre = normaliser(candidat.get("titre_page") or candidat.get("titre", ""))
+    if len(titre) < 10:
+        return []
+    lieu = normaliser(candidat.get("lieu_page") or candidat.get("lieu", ""))
+    annee = str(candidat.get("annee_detectee") or candidat.get("annee_recherchee") or ANNEE_PRIORITAIRE)
+    domaine_primaire = _domaine_url(candidat.get("url_finale") or candidat.get("url"))
+    morceaux = [f'"{titre[:180]}"']
+    if lieu and lieu not in titre:
+        morceaux.append(f'"{lieu[:80]}"')
+    if annee:
+        morceaux.append(annee)
+    if domaine_primaire:
+        morceaux.append(f'-site:{domaine_primaire}')
+    q = " ".join(morceaux)
+    url = f"https://news.google.com/rss/search?q={quote_plus(q)}&hl=fr&gl=FR&ceid=FR:fr"
+    try:
+        response = requests.get(
+            url, timeout=min(TIMEOUT, 12),
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ApecVeille/42)"}
+        )
+        if response.status_code >= 400:
+            return []
+        feed = feedparser.parse(response.content)
+        out=[]
+        titre_cle = cle_titre_evenement(titre)
+        for entry in getattr(feed, "entries", [])[:8]:
+            et = normaliser(str(entry.get("title", "")))
+            if not et:
+                continue
+            ratio = difflib.SequenceMatcher(None, titre_cle, cle_titre_evenement(et)).ratio()
+            if ratio < 0.45:
+                continue
+            link = str(entry.get("link", "")).strip()
+            domaine = _domaine_url(link)
+            if domaine and domaine == domaine_primaire:
+                continue
+            out.append({
+                "titre": str(entry.get("title", ""))[:400],
+                "url": link,
+                "source": domaine or "Google News",
+                "similarite": round(ratio, 3),
+            })
+        return out[:3]
+    except Exception:
+        return []
+
+
+def verifier_preuves_multisources(candidats):
+    """V42 : transforme les informations disponibles en niveau de preuve.
+
+    La preuve n'est jamais un malus et ne décide pas seule de la pertinence.
+    Elle sert à distinguer :
+      4 = preuve explicite + source officielle + seconde source indépendante
+      3 = preuve explicite sur une source fiable
+      2 = plusieurs indices cohérents, sans confirmation indépendante
+      1 = signal faible
+      0 = aucune preuve exploitable
+    """
+    if not candidats:
+        return candidats
+
+    def worker(c):
+        titre = normaliser(c.get("titre_page") or c.get("titre", ""))
+        desc = normaliser(c.get("description_page") or c.get("description", ""))
+        date_evt = str(c.get("date_evenement_page") or "").strip()
+        lieu_evt = normaliser(c.get("lieu_page") or c.get("adresse_page") or c.get("lieu", ""))
+        org = normaliser(c.get("organisateur_page") or "")
+        url = c.get("url_finale") or c.get("url") or ""
+        source = str(c.get("source", ""))
+        texte = " ".join(x for x in (titre, desc, date_evt, lieu_evt, org) if x)
+
+        signaux = []
+        if titre and any(x in titre for x in EVENT_SIGNAL_CIBLE):
+            signaux.append("INTITULE_EVENEMENT")
+        if any(x in texte for x in EVENT_PREUVE_FORTE):
+            signaux.append("FORMULATION_EVENEMENTIELLE")
+        if date_evt:
+            signaux.append("DATE_EXPLICITE")
+        if lieu_evt:
+            signaux.append("LIEU_EXPLICITE")
+        if org:
+            signaux.append("ORGANISATEUR_EXPLICITE")
+        if c.get("preuve_evenement") == "OUI" or c.get("evenement_detecte") == "OUI":
+            signaux.append("PREUVE_EXISTANTE")
+
+        niveau_source = classer_fiabilite_source(c)
+        secondaire = []
+        # On ne dépense une recherche secondaire que si le candidat est
+        # suffisamment structuré pour que la vérification soit utile.
+        if len(signaux) >= 2 and (date_evt or lieu_evt):
+            secondaire = _preuve_secondaire_google_news(c)
+
+        if secondaire:
+            signaux.append("SOURCE_SECONDAIRE")
+
+        explicite = bool(date_evt and lieu_evt and (org or c.get("preuve_evenement") == "OUI"))
+        if explicite and niveau_source <= 2 and secondaire:
+            niveau = 4
+            libelle = "FORTE"
+        elif explicite and niveau_source <= 2:
+            niveau = 3
+            libelle = "FORTE"
+        elif len(set(signaux)) >= 3:
+            niveau = 2
+            libelle = "MOYENNE"
+        elif len(set(signaux)) >= 1:
+            niveau = 1
+            libelle = "FAIBLE"
+        else:
+            niveau = 0
+            libelle = "ABSENTE"
+
+        c["niveau_preuve"] = niveau
+        c["preuve_cible"] = (
+            "FORTE" if any(x in texte for x in APEC_DIRECT + RELATION_ENTREPRISE)
+            else "MOYENNE" if any(x in texte for x in APEC_QUALIFIE + SUPERIEUR_FORT)
+            else "FAIBLE"
+        )
+        c["preuve_evenement_v42"] = libelle
+        c["preuves_v42"] = " | ".join(dict.fromkeys(signaux))
+        c["source_secondaire_v42"] = " | ".join(
+            f"{x.get('source','')}::{x.get('titre','')}::{x.get('url','')}" for x in secondaire
+        )
+        c["nombre_sources_secondaires_v42"] = len(secondaire)
+        c["preuve_verifiee_v42"] = "OUI" if niveau >= 3 else "NON"
+        c["preuve_source_primaire"] = source
+        return c
+
+    with ThreadPoolExecutor(max_workers=min(8, MAX_WORKERS)) as executor:
+        futures=[executor.submit(worker,c) for c in candidats]
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception:
+                pass
+    return candidats
+
 def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     """Cascade conservatrice : 3 tours Gemini 3.1, puis TOP 3 en 3.8.
 
@@ -3095,8 +3254,25 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         try: c.update(calculer_score(c))
         except Exception: pass
 
+    # ------------------------------------------------------------
+    # V42 — PREUVES MULTI-SOURCES
+    # ------------------------------------------------------------
+    # Cette couche intervient après le contrôle géographique et avant Gemini.
+    # Elle n'élimine aucun candidat : elle documente la solidité de la preuve.
+    if a_traiter:
+        print(f"🔎 V42 — vérification des preuves : {len(a_traiter)} candidats")
+        verifier_preuves_multisources(a_traiter)
+
     if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
         a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
+
+    preuves = [r for r in a_traiter if r.get("niveau_preuve") is not None]
+    AUDIT_PIPELINE["preuves_verifiees"] = len(preuves)
+    AUDIT_PIPELINE["preuves_fortes"] = sum(1 for r in preuves if r.get("preuve_evenement_v42") == "FORTE")
+    AUDIT_PIPELINE["preuves_moyennes"] = sum(1 for r in preuves if r.get("preuve_evenement_v42") == "MOYENNE")
+    AUDIT_PIPELINE["preuves_faibles"] = sum(1 for r in preuves if r.get("preuve_evenement_v42") == "FAIBLE")
+    AUDIT_PIPELINE["preuves_absentes"] = sum(1 for r in preuves if r.get("preuve_evenement_v42") == "ABSENTE")
+    AUDIT_PIPELINE["sources_secondaires_trouvees"] = sum(int(r.get("nombre_sources_secondaires_v42", 0) or 0) for r in preuves)
 
     ia_resultats = list(geo_preexclus) + list(geo_reutilises_bdd) + list(reutilises_bdd) + list(memorises)
     quota_bloque = False
@@ -4332,6 +4508,10 @@ def generer_rapport_pdf_unique(
         [cell("Sources de découverte"), cell(audit.get("sources_decouverte", 0))],
         [cell("Événements découverts"), cell(audit.get("candidats_decouverts", 0))],
         [cell("Candidats perdus — réconciliation"), cell(audit.get("candidats_perdus_reconciliation", 0))],
+        [cell("Preuves vérifiées V42"), cell(audit.get("preuves_verifiees", 0))],
+        [cell("Preuves fortes"), cell(audit.get("preuves_fortes", 0))],
+        [cell("Preuves moyennes"), cell(audit.get("preuves_moyennes", 0))],
+        [cell("Sources secondaires trouvées"), cell(audit.get("sources_secondaires_trouvees", 0))],
         [cell("Pertinents finaux"), cell(audit.get("pertinents_final", len(pertinents)))],
         [cell("À vérifier finaux"), cell(audit.get("a_verifier_final", len(a_verifier)))],
         [cell("Non pertinents finaux"), cell(audit.get("non_pertinents_final", len(non_pertinents)))],
@@ -4374,6 +4554,10 @@ def generer_rapport_pdf_unique(
         ("Sources de découverte", "sources_decouverte"),
         ("Événements découverts", "candidats_decouverts"),
         ("Candidats perdus — réconciliation", "candidats_perdus_reconciliation"),
+        ("Preuves vérifiées V42", "preuves_verifiees"),
+        ("Preuves fortes", "preuves_fortes"),
+        ("Preuves moyennes", "preuves_moyennes"),
+        ("Sources secondaires trouvées", "sources_secondaires_trouvees"),
     ]:
         audit_lignes.append([cell(lib), cell(audit.get(cle, 0))])
     if motifs_audit:
@@ -4423,7 +4607,11 @@ def generer_rapport_pdf_unique(
             cell(valeur(c, "titre", valeur(c, "title", "Sans titre"))),
             cell(valeur(c, "statut")),
             cell(score_affiche),
-            cell(valeur(c, "raison", valeur(c, "motif", ""))),
+            cell(
+                "Preuve: " + valeur(c, "preuve_evenement_v42", "—")
+                + " | " + valeur(c, "preuve_cible", "—")
+                + " | " + valeur(c, "raison", valeur(c, "motif", ""))
+            ),
         ])
     if len(lignes) == 1:
         lignes.append([cell("Aucun candidat"), cell("—"), cell("—"), cell("Aucun résultat prioritaire")])
@@ -4449,7 +4637,11 @@ def generer_rapport_pdf_unique(
 
     ia_lignes = [header_row(["Candidat", "Décision", "Confiance", "Analyse / action"])]
     for c in list(ia_resultats or [])[:50]:
-        analyse = valeur(c, "analyse_humaine", valeur(c, "raison", ""))
+        analyse = (
+            "Preuve événement: " + valeur(c, "preuve_evenement_v42", "—")
+            + " | Sources secondaires: " + valeur(c, "nombre_sources_secondaires_v42", "0")
+            + " | " + valeur(c, "analyse_humaine", valeur(c, "raison", ""))
+        )
         ia_lignes.append([
             cell(valeur(c, "titre", valeur(c, "title", "Sans titre"))),
             cell(valeur(c, "statut", valeur(c, "decision", "—"))),
