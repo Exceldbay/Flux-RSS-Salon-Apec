@@ -12,8 +12,8 @@ import difflib
 import subprocess
 import sys
 import os
-from html import unescape
 import unicodedata
+from html import unescape
 
 # ============================================================
 # RAPPORT PDF UNIQUE PAR EXECUTION
@@ -121,7 +121,7 @@ MAX_IA_38 = int(os.getenv("MAX_GEMINI_38_ANALYSES", "3"))
 IA_TEST_MODE = os.getenv("IA_TEST_MODE", "false").lower() == "true"
 IA_TEST_MAX_CANDIDATS = int(os.getenv("IA_TEST_MAX_CANDIDATS", "5"))
 IA_TEST_NO_PERSIST = os.getenv("IA_TEST_NO_PERSIST", "false").lower() == "true"
-IA_RULES_VERSION = "v29-3x31-plus1x38-geo-preanalyse"
+IA_RULES_VERSION = "v32-3x31-plus1x38-geo-delta-arbitrage-preuves"
 GEMINI_SCORE_MIN = int(os.getenv("SEUIL_GEMINI", "24"))
 MAX_ERREURS_IA_CONSECUTIVES = 3  # disjoncteur : on stoppe après 3 échecs d'affilée
 DEPARTEMENTS_CIBLES = {"16", "17", "19", "23", "79", "86", "87"}
@@ -282,11 +282,11 @@ def court(texte, n=70):
 # VERSION ET MÉMOIRE DES DÉCISIONS IA
 # ============================================================
 
-VERSION_PROGRAMME = "2026-11-26-v31-3tours-pdf-wrap-no-negative-score"
+VERSION_PROGRAMME = "2026-11-27-v32-geo-delta-arbitrage-preuves"
 
 # À changer quand le prompt de ia.py ou les règles de décision évoluent :
 # toutes les décisions mémorisées avec une autre version sont ignorées.
-REGLES_VERSION = "2026-11-26-v29-geo-preanalyse"
+REGLES_VERSION = "2026-11-27-v32-geo-delta-arbitrage-preuves"
 
 # Durée (jours) pendant laquelle une décision mémorisée est réutilisée.
 MEMOIRE_VALIDITE_JOURS = {
@@ -2404,7 +2404,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
                 "confiance_ia": int(geo.get("geo_confiance", 0) or 0),
                 "raison_ia": geo.get("geo_motif", "Hors périmètre géographique."),
                 "motif_exclusion": "HORS_GEOGRAPHIE",
-                "ia_analyse": "NON",
+                "ia_analyse": "GEO_PREEXCLUSION",
                 "statut_final": "Non pertinent",
             })
             geo_preexclus.append(candidat)
@@ -2412,13 +2412,50 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
             candidat["ia_preexclusion_geo"] = "NON"
             candidats_geo_ok.append(candidat)
 
+    # Même les exclusions géographiques sont identifiées par la BDD :
+    # une exclusion déjà connue ne ressort pas comme « nouvelle » chaque jour.
+    geo_nouveaux_bdd, geo_modifies_bdd, geo_reutilises_bdd = classifier_candidats_bdd(geo_preexclus, bdd_candidats) if geo_preexclus else ([], [], [])
+    geo_preexclus = geo_nouveaux_bdd + geo_modifies_bdd
+
     candidats = sorted(candidats_geo_ok, key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
     nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
     a_analyser_bdd = nouveaux_bdd + modifies_bdd
     memoire_globale = charger_memoire_globale()
     a_verifier_memoire, _ = appliquer_memoire_globale(a_analyser_bdd, memoire_globale)
     a_traiter, memorises = appliquer_memoire_ia(a_verifier_memoire, memoire_ia)
+
+    # ------------------------------------------------------------
+    # SECOND VERROU GÉOGRAPHIQUE — APRÈS ENRICHISSEMENT DE PAGE
+    # ------------------------------------------------------------
+    # La première pré-analyse est volontairement rapide. Ici, on attend
+    # d'avoir récupéré lieu_page/adresse_page/titre_page/contenu_page avant
+    # de consommer le moindre appel Gemini. Cela corrige notamment les cas
+    # du type « Campus Nantes » qui ne sont pas présents dans le RSS brut.
     enrichir_candidats_ia(a_traiter)
+    geo_preexclus_apres_enrichissement = []
+    a_traiter_geo_ok = []
+    for c in a_traiter:
+        geo2 = preanalyser_geographie(c)
+        c.update(geo2)
+        c["ia_preanalyse"] = "OUI"
+        if geo2.get("geo_preanalyse") == "GEO_HORS_CIBLE":
+            c.update({
+                "ia_preexclusion_geo": "OUI",
+                "decision_ia": "NON_PERTINENT",
+                "confiance_ia": int(geo2.get("geo_confiance", 0) or 0),
+                "raison_ia": "Pré-exclusion géographique après enrichissement : " + geo2.get("geo_motif", "hors périmètre"),
+                "motif_exclusion": "HORS_GEOGRAPHIE",
+                "ia_analyse": "GEO_PREEXCLUSION",
+                "statut_final": "Non pertinent",
+                "geo_controle_final": "BLOQUE_AVANT_GEMINI",
+            })
+            geo_preexclus_apres_enrichissement.append(c)
+        else:
+            c["ia_preexclusion_geo"] = "NON"
+            a_traiter_geo_ok.append(c)
+    a_traiter = a_traiter_geo_ok
+    geo_preexclus.extend(geo_preexclus_apres_enrichissement)
+
     for c in a_traiter:
         try: c.update(calculer_score(c))
         except Exception: pass
@@ -2426,7 +2463,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     if IA_TEST_MODE and IA_TEST_MAX_CANDIDATS > 0:
         a_traiter = a_traiter[:IA_TEST_MAX_CANDIDATS]
 
-    ia_resultats = list(geo_preexclus) + list(reutilises_bdd) + list(memorises)
+    ia_resultats = list(geo_preexclus) + list(geo_reutilises_bdd) + list(reutilises_bdd) + list(memorises)
     quota_bloque = False
     erreurs_consecutives = 0
     appels_31 = appels_38 = 0
@@ -2436,7 +2473,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     print("========================================")
     print(f"Règles : {IA_RULES_VERSION}")
     print(f"Candidats filtrés : {len(candidats) + len(geo_preexclus)}")
-    print(f"Pré-exclusions géographiques IA : {len(geo_preexclus)}")
+    print(f"Pré-exclusions géographiques IA : {len(geo_preexclus)} nouvelles/modifiées | {len(geo_reutilises_bdd)} anciennes masquées")
     print(f"BDD : {len(reutilises_bdd)} réutilisés / {len(nouveaux_bdd)} nouveaux / {len(modifies_bdd)} modifiés")
     print(f"Mémoire IA : {len(memorises)} réutilisés")
     print(f"À analyser : {len(a_traiter)}" + (f" | MODE TEST, max {IA_TEST_MAX_CANDIDATS}" if IA_TEST_MODE else ""))
@@ -2522,11 +2559,31 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
         analyse38, dernier = appel_avec_cooldown(analyser_resultat_38, (r, r), COOLDOWN_38_SECONDS, dernier)
         appels_38 += 1; r.update(analyse38); r["escalade_38"] = "OUI"; r["motif_escalade_38"] = "Top candidat après 3 tours Gemini 3.1"
         if analyse38.get("decision_ia_38") != "IA_INDISPONIBLE":
-            r["decision_ia"] = analyse38.get("decision_ia_38", r.get("decision_ia"))
+            # 3.8 est un arbitre senior, pas un remplacement aveugle de 3.1.
+            # La décision T3 reste la base ; l'arbitrage 3.8 détermine comment
+            # elle évolue. La sortie JSON de 3.8 est conservée pour audit.
+            decision_t3 = r.get("decision_ia_31_t3", r.get("decision_ia", "A_VERIFIER"))
+            arbitrage = str(analyse38.get("arbitrage_38", "AUCUN")).upper()
+            if arbitrage == "CONFIRMER":
+                decision_finale = decision_t3
+            elif arbitrage == "RETROGRADER":
+                decision_finale = "A_VERIFIER" if decision_t3 == "PERTINENT" else decision_t3
+            elif arbitrage == "REJETER":
+                decision_finale = "NON_PERTINENT"
+            else:
+                # Si l'arbitrage est absent/incohérent, on ne laisse pas 3.8
+                # écraser T3 par sa seule décision textuelle.
+                decision_finale = decision_t3
+            r["decision_ia_31_finale"] = decision_t3
+            r["arbitrage_38"] = arbitrage
+            r["decision_ia_38_brute"] = analyse38.get("decision_ia_38", "")
+            r["decision_ia"] = decision_finale
             r["confiance_ia"] = analyse38.get("confiance_ia_38", r.get("confiance_ia", 0))
             r["raison_ia"] = analyse38.get("raison_ia_38", r.get("raison_ia", ""))
             r["analyse_humaine"] = analyse38.get("analyse_humaine_38", r.get("analyse_humaine", ""))
             r["action_recommandee"] = analyse38.get("action_recommandee_38", r.get("action_recommandee_31_t3", ""))
+            r["preuve_decisive_38"] = analyse38.get("preuve_decisive_38", "")
+            r["apport_38"] = analyse38.get("apport_38", "")
             r["modele_ia"] = "gemini-3.1-flash-lite ×3 + gemini-3.8-flash"
             classer_statut_final(r, r["decision_ia"])
         else:
@@ -2571,7 +2628,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     print(f"Blocage 3.1 : {'OUI' if quota_bloque else 'NON'}")
 
     if not (IA_TEST_MODE and IA_TEST_NO_PERSIST):
-        a_persister = [r for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("ia_analyse") == "OUI"]
+        a_persister = [r for r in ia_resultats if r.get("bdd_reutilise") is not True and r.get("ia_analyse") in {"OUI", "GEO_PREEXCLUSION"}]
         if a_persister:
             enregistrer_candidats_bdd(a_persister, bdd_candidats)
     else:
@@ -2901,6 +2958,11 @@ def sauvegarder(
 
     for resultat in tous:
         resultat["date_collecte"] = date_collecte
+        # Aucun score négatif n'est autorisé dans les sorties.
+        try:
+            resultat["score"] = max(0, int(float(resultat.get("score", 0) or 0)))
+        except Exception:
+            resultat["score"] = 0
 
     colonnes = [
         "titre",
@@ -3244,7 +3306,7 @@ def enregistrer_candidats_bdd(resultats, bdd):
         # On ne fige dans la BDD que les candidats réellement analysés.
         # Une IA indisponible ou une analyse interrompue doit pouvoir être
         # retentée lors de la prochaine run.
-        if resultat.get("ia_analyse") not in {"OUI", "MEMOIRE"}:
+        if resultat.get("ia_analyse") not in {"OUI", "MEMOIRE", "GEO_PREEXCLUSION"}:
             continue
 
         cle = resultat.get("bdd_cle") or _cle_stable_candidat(resultat)
@@ -3682,7 +3744,7 @@ def generer_rapport_pdf_unique(
         str(pdf_path), pagesize=A4,
         rightMargin=15*mm, leftMargin=15*mm,
         topMargin=15*mm, bottomMargin=15*mm,
-        title="Rapport de veille APEC"
+        title="Rapport de veille APEC — nouveaux et modifiés"
     )
     doc.build(story)
 
@@ -3817,6 +3879,7 @@ def main():
     resultats_du_jour = [
         r for r in ia_resultats
         if r.get("bdd_reutilise") is not True
+        and r.get("ia_analyse") != "MEMOIRE"
     ]
     urls_du_jour = {str(r.get("url") or "").strip() for r in resultats_du_jour}
     urls_du_jour.discard("")
@@ -3878,9 +3941,12 @@ def main():
         if x.get("url") not in candidats_urls
     ]
 
-    pertinents = pertinents_ia
-    a_verifier = a_verifier_ia
-    non_pertinents = non_pertinents_python + non_pertinents_ia
+    # Sorties quotidiennes : uniquement les candidats NOUVEAUX ou MODIFIÉS.
+    # La BDD et les mémoires restent complètes, mais elles ne polluent jamais
+    # le CSV/Excel/PDF/affichage quotidien.
+    pertinents = [r for r in pertinents_ia if r.get("bdd_reutilise") is not True and r.get("ia_analyse") != "MEMOIRE"]
+    a_verifier = [r for r in a_verifier_ia if r.get("bdd_reutilise") is not True and r.get("ia_analyse") != "MEMOIRE"]
+    non_pertinents = [r for r in (non_pertinents_python + non_pertinents_ia) if r.get("bdd_reutilise") is not True and r.get("ia_analyse") != "MEMOIRE"]
 
     total_dedoublonne = (
         len(pertinents)
@@ -3900,6 +3966,7 @@ def main():
     print(f"À vérifier du jour : {len(a_verifier_jour)}")
     print(f"Non pertinents du jour : {len(non_pertinents_jour)}")
     print(f"Anciens candidats masqués : {len(ia_resultats) - len(resultats_du_jour)}")
+    print("🛡️ Sorties quotidiennes verrouillées : NOUVEAU + MODIFIÉ uniquement")
 
     # Priorités 8-10 : delta, performance des opérateurs et sortie Teams.
     actuels_utiles = pertinents + a_verifier
