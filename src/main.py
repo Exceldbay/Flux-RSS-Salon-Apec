@@ -2417,6 +2417,7 @@ def appliquer_ia(pertinents, a_verifier, memoire_ia=None, bdd_candidats=None):
     geo_nouveaux_bdd, geo_modifies_bdd, geo_reutilises_bdd = classifier_candidats_bdd(geo_preexclus, bdd_candidats) if geo_preexclus else ([], [], [])
     geo_preexclus = geo_nouveaux_bdd + geo_modifies_bdd
 
+    geo_reutilises_bdd = geo_preexclus_secondaire_reutilises
     candidats = sorted(candidats_geo_ok, key=lambda x: (str(ANNEE_PRIORITAIRE) in str(x.get("annee_detectee", "")), x.get("score", 0)), reverse=True)
     nouveaux_bdd, modifies_bdd, reutilises_bdd = classifier_candidats_bdd(candidats, bdd_candidats)
     a_analyser_bdd = nouveaux_bdd + modifies_bdd
